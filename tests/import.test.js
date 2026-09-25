@@ -68,3 +68,20 @@ test('arquivos inválidos e excesso de colunas retornam erro legível', async ()
   await assert.rejects(() => parseSpreadsheet(Buffer.from('x'), 'arquivo.xls'), /salve como/);
   assert.throws(() => gridToSheet('Grande',[Array(151).fill('Coluna')]), /150 colunas/);
 });
+
+
+test('XLSX no formato LexisPredict com 2.664 processos e telefone numérico é importado inteiro', async () => {
+  const headers = ['Assistente','Escritorio','Advogado','Cliente','Telefone','Protocolo','Distribuicao','Status','Observacoes','Produtos','Data_Movimentacao','Andamento','Retorno','Proximo_Retorno','Tribunal','Evento_Tipo','Novo_Andamento','Encerrado_Tribunal','Busca_Apreensao','Cumprimento','DJEN_Resumo','Situacao_Prazo','Dias_Sem_Retorno','Procedente','Improcedente','Evento_Tipo.1'];
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Processos');
+  sheet.addRow(headers);
+  for (let i = 0; i < 2664; i++) sheet.addRow(['Assistente','Escritório','Advogado',`Cliente ${i+1}`, 11900000000 + i, `P-${i+1}`,'','ATIVO','','','','','','','','','','','','','','','', '', '', '']);
+  for (let i = 0; i < 26; i++) workbook.addWorksheet(`Aba ${i+2}`).addRow([]);
+  const imported = await parseSpreadsheet(Buffer.from(await workbook.xlsx.writeBuffer()), 'LexisPredict_Relatorio_Carteira.xlsx');
+  const processos = imported.sheets.find(s => s.name === 'Processos');
+  assert.ok(processos);
+  assert.equal(processos.rows.length, 2664);
+  assert.equal(processos.suggestedPhone, 'Telefone');
+  assert.equal(processos.suggestedName, 'Cliente');
+  assert.equal(processos.rows[0].values.Telefone, '11900000000');
+});
