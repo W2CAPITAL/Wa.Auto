@@ -88,6 +88,11 @@ try {
   await page.screenshot({ path: 'test-results/02-campanha-desktop.png', fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Desktop horizontal overflow');
   await page.click('[data-page="blocked"]');
+  assert.match(await page.$eval('.license-section', el => el.innerText), /W1\/W2 Soluções Capitais/);
+  assert.match(await page.$eval('.license-section', el => el.innerText), /Davi Alves Figueredo/);
+  assert.equal(await page.$eval('.license-card-image', img => img.complete && img.naturalWidth > 0), true);
+  const licenseText = await page.evaluate(async () => (await fetch('/LICENSE.txt')).text());
+  assert.match(licenseText, /Todos os direitos reservados/);
   await page.type('#block-phone', '21999990002');
   await page.type('#block-reason', 'Teste de preferência do cliente');
   await page.click('#block-form button');
