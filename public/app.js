@@ -241,7 +241,8 @@ onClick('sample-template', () => {
 });
 async function prepareAllRecipients() {
   state.preview = await api('/api/preview', { method: 'POST', body: fields() });
-  state.selected = new Set(state.preview.entries.filter(row => row.status === 'pending').map(row => row.row));
+  const pendingRows = state.preview.entries.filter(row => row.status === 'pending').map(row => row.row);
+  state.selected = new Set(state.contacts ? pendingRows.filter(row => state.contactSelection.has(row)) : pendingRows);
   state.reviewPage = 0; state.saved = false;
   $('review-panel').classList.remove('hidden');
   renderReview(); renderMessage();
@@ -265,7 +266,9 @@ onClick('send-all-valid', async () => {
     throw new Error('Conecte o WhatsApp antes de iniciar o envio para todos.');
   }
   const preview = await prepareAllRecipients();
-  const count = preview.counts.pending || 0;
+  const allPending = preview.entries.filter(row => row.status === 'pending').map(row => row.row);
+  state.selected = new Set(allPending);
+  const count = allPending.length;
   if (!count) throw new Error('Nenhum contato válido ficou disponível para envio.');
   if (!confirm(`Enviar esta mensagem para todos os ${number(count)} contatos válidos da aba ${preview.sheet}? Repetidos, inválidos e “não contatar” serão excluídos.`)) return;
   const campaign = await api('/api/campaigns', { method: 'POST', body: { ...fields(), selectedRows: [...state.selected] } });
