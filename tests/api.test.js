@@ -15,6 +15,11 @@ test('API: upload → revisão → rascunho → início → confirmação → re
   const boot=await (await fetch(`${base}/api/bootstrap`)).json();const headers={'X-WA-CSRF':boot.csrfToken,'Content-Type':'application/json'};
   assert.equal((await fetch(`${base}/api/whatsapp/connect`,{method:'POST'})).status,403);
   assert.equal((await fetch(`${base}/api/bootstrap`,{headers:{Origin:'https://evil.example'}})).status,403);
+  const crossSitePage = await fetch(base, { headers: { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate' } });
+  assert.equal(crossSitePage.status, 200);
+  assert.match(await crossSitePage.text(), /WA\.Auto/);
+  const crossSiteApi = await fetch(`${base}/api/bootstrap`, { headers: { 'Sec-Fetch-Site': 'cross-site' } });
+  assert.equal(crossSiteApi.status, 403);
   const cloudStatus = await new Promise((resolve, reject) => {
     const request = http.get(`${base}/api/bootstrap`, {
       headers: {
