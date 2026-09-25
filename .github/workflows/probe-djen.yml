@@ -1,0 +1,23 @@
+name: Probe DJEN cloud
+on:
+  push:
+    paths:
+      - ".github/workflows/probe-djen.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar proxy DJEN
+        shell: bash
+        run: |
+          set -uo pipefail
+          URL='https://wa-auto-djen-proxy-w2-capital.vercel.app/api/djen-proxy?cnj=1030082-54.2024.8.26.0002&start=2025-09-25&end=2026-09-25'
+          echo "PROXY_URL=$URL"
+          curl -L -sS --max-time 35 -D /tmp/headers "$URL" -o /tmp/body || true
+          echo "--- HEADERS ---"
+          cat /tmp/headers || true
+          echo "--- BODY ---"
+          head -c 12000 /tmp/body || true
+          echo
