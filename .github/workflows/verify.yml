@@ -110,6 +110,46 @@ jobs:
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
+      - name: Exigir QR real do WhatsApp Web no Windows
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
+          $env:WA_DATA_DIR = Join-Path $env:RUNNER_TEMP 'wa-auto-live-qr'
+          $env:WA_OPEN_BROWSER = '0'
+          $env:WA_AUTO_CONNECT = '1'
+          $process = Start-Process -FilePath (Join-Path $dist 'node.exe') -ArgumentList 'src/server.js' -WorkingDirectory $dist -PassThru -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'wa-auto-live-out.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'wa-auto-live-err.log')
+          try {
+            $qr = $false
+            for ($i=0; $i -lt 90; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $r = Invoke-WebRequest 'http://127.0.0.1:3210/api/state' -UseBasicParsing -TimeoutSec 3
+                $state = $r.Content | ConvertFrom-Json
+                $status = $state.connection.status
+                Write-Host "WhatsApp status: $status"
+                if ($status -eq 'qr' -or $status -eq 'authenticated' -or $status -eq 'ready') {
+                  $qr = $true
+                  break
+                }
+                if ($status -eq 'error') {
+                  throw ("WhatsApp informou erro: " + $state.connection.message)
+                }
+              } catch {
+                if ($_.Exception.Message -like 'WhatsApp informou erro:*') { throw }
+              }
+              if ($process.HasExited) { break }
+            }
+            if (-not $qr) {
+              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-live-out.log') -ErrorAction SilentlyContinue
+              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-live-err.log') -ErrorAction SilentlyContinue
+              throw 'O cliente real do WhatsApp Web nao chegou ao QR em 90 segundos.'
+            }
+            Write-Host 'QR real do WhatsApp Web alcançado com sucesso.'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: WA.Auto-Windows
