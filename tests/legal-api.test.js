@@ -59,14 +59,14 @@ test('API jurídica: cadastrar, criar baseline, detectar novidade, enviar e impo
   assert.ok(list.events.some(event=>event.send_status==='sent'));
 
   const form=new FormData();
-  form.append('file',new Blob([`Cliente;Telefone;Processo;Autorizado;Observacoes\nBruno;21999990002;${cnj};sim;\nSem processo;11900000000;;sim;\nBloqueado;31999990003;00000010020268260000;sim;NÃO FALAR\nSem consentimento;41999990004;00000020020268260000;nao;\n`]),'processos.csv');
+  form.append('file',new Blob([`Cliente;Telefone;Processo;Retorno;Proximo_Retorno;Data_Movimentacao;Andamento;Autorizado;Observacoes\nBruno;21999990002;${cnj};24/09/2026;30/09/2026;25/09/2026 10:00;Conclusos para despacho;sim;\nSem processo;11900000000;;24/09/2026;30/09/2026;25/09/2026 10:00;Movimento;sim;\nBloqueado;31999990003;00000010020268260000;24/09/2026;30/09/2026;25/09/2026 10:00;Movimento;sim;NÃO FALAR\nSem consentimento;41999990004;00000020020268260000;24/09/2026;30/09/2026;25/09/2026 10:00;Movimento;nao;\n`]),'processos.csv');
   const upload=await fetch(`${base}/api/imports`,{method:'POST',headers:{'X-WA-CSRF':boot.csrfToken},body:form});
   assert.equal(upload.status,201);
   const imported=await upload.json();
 
   const importedMonitors=await fetch(`${base}/api/legal/monitors/import`,{
     method:'POST',headers,
-    body:JSON.stringify({importId:imported.id,sheet:'Contatos',processColumn:'Processo',phoneColumn:'Telefone',nameColumn:'Cliente',consentColumn:'Autorizado',mode:'datajud',notifyWhatsapp:true})
+    body:JSON.stringify({importId:imported.id,sheet:'Contatos',processColumn:'Processo',phoneColumn:'Telefone',nameColumn:'Cliente',lastReturnColumn:'Retorno',nextReturnColumn:'Proximo_Retorno',movementDateColumn:'Data_Movimentacao',movementTextColumn:'Andamento',consentColumn:'Autorizado',mode:'datajud',notifyWhatsapp:true})
   });
   assert.equal(importedMonitors.status,201);
   const importedResult=await importedMonitors.json();
@@ -74,9 +74,16 @@ test('API jurídica: cadastrar, criar baseline, detectar novidade, enviar e impo
   assert.equal(importedResult.invalid,1);
   assert.equal(importedResult.blocked,1);
   assert.equal(importedResult.withoutConsent,1);
+  assert.equal(importedResult.queued,1);
+  assert.equal(importedResult.sentNow,1);
+  assert.equal(importedResult.missingReturn,0);
   assert.equal(store.legalMonitors().length,2);
+  const bruno=store.legalMonitors().find(item=>item.client_name==='Bruno');
+  assert.ok(bruno.last_return_at);
+  assert.ok(bruno.last_notified_at);
+  assert.ok(store.legalEvents(bruno.id).some(event=>event.title==='Conclusos para despacho' && event.send_status==='sent'));
 
   const duplicateScan=await (await fetch(`${base}/api/legal/monitors/${created.monitor.id}/scan`,{method:'POST',headers,body:'{}'})).json();
   assert.equal(duplicateScan.newEvents,0,'evento já conhecido não pode ser reenviado');
-  assert.equal(transport.sent.length,1);
+  assert.equal(transport.sent.length,2);
 });
