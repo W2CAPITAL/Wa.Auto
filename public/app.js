@@ -96,15 +96,30 @@ function configureLegalImport() {
   if (!state.imported || !$('legal-import-sheet')) return;
   $('legal-import-file').textContent = state.imported.filename;
   const sheets = state.imported.sheets.filter(sheet => sheet.rowCount);
-  options($('legal-import-sheet'), sheets.map(sheet => sheet.name), $('sheet')?.value || sheets[0]?.name || '', null);
-  const sheet = state.imported.sheets.find(item => item.name === $('legal-import-sheet').value) || sheets[0];
+  const preferred = sheets.find(sheet => /^processos?$/i.test(sheet.name)) || sheets.find(sheet => sheet.suggestedPhone) || sheets[0];
+  options($('legal-import-sheet'), sheets.map(sheet => sheet.name), $('legal-import-sheet').value || preferred?.name || '', null);
+  const sheet = state.imported.sheets.find(item => item.name === $('legal-import-sheet').value) || preferred;
   if (!sheet) return;
   const guess = patterns => sheet.headers.find(header => patterns.some(pattern => pattern.test(header))) || '';
-  options($('legal-process-column'), sheet.headers, guess([/process/i,/cnj/i,/n[uú]mero.*process/i]), 'Selecione');
-  options($('legal-phone-column'), sheet.headers, guess([/telefone/i,/celular/i,/whats/i,/fone/i]), 'Selecione');
-  options($('legal-name-column'), sheet.headers, guess([/cliente/i,/nome/i,/parte/i]), 'Não usar');
+  options($('legal-process-column'), sheet.headers, guess([/^Protocolo$/i,/protocolo.*ref/i,/process/i,/cnj/i]), 'Selecione');
+  options($('legal-phone-column'), sheet.headers, guess([/^Telefone$/i,/celular/i,/whats/i,/fone/i]), 'Selecione');
+  options($('legal-name-column'), sheet.headers, guess([/^Cliente$/i,/^nome$/i,/parte/i]), 'Não usar');
+  options($('legal-last-return-column'), sheet.headers, guess([/^Retorno$/i,/ultimo[_ ]?retorno/i,/último.*retorno/i]), 'Não usar');
+  options($('legal-next-return-column'), sheet.headers, guess([/^Proximo_Retorno$/i,/pr[oó]ximo.*retorno/i,/proximo_retorno/i]), 'Não usar');
+  options($('legal-movement-date-column'), sheet.headers, guess([/^Data_Movimentacao$/i,/data.*movimenta/i,/datajud.*ultimo.*movimento/i]), 'Não usar');
+  options($('legal-movement-text-column'), sheet.headers, guess([/^Andamento$/i,/datajud.*ultimo.*nome/i,/ultima.*movimenta/i]), 'Não usar');
   options($('legal-consent-column'), sheet.headers, guess([/autoriz/i,/consent/i,/opt.?in/i,/whats.*ok/i]), 'Não usar');
   $('legal-import-button').disabled = !$('legal-process-column').value || !$('legal-phone-column').value;
+
+  const mapped = [
+    $('legal-process-column').value && ('Processo=' + $('legal-process-column').value),
+    $('legal-phone-column').value && ('Telefone=' + $('legal-phone-column').value),
+    $('legal-name-column').value && ('Cliente=' + $('legal-name-column').value),
+    $('legal-last-return-column').value && ('Último retorno=' + $('legal-last-return-column').value),
+    $('legal-movement-date-column').value && ('Data movimento=' + $('legal-movement-date-column').value),
+    $('legal-movement-text-column').value && ('Andamento=' + $('legal-movement-text-column').value)
+  ].filter(Boolean).join(' · ');
+  $('legal-import-result').textContent = mapped ? ('Reconhecido automaticamente: ' + mapped) : 'Selecione Processo e Telefone para ativar o monitoramento.';
 }
 
 async function loadFilterValues(selected = '') {
