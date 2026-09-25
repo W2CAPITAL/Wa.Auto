@@ -56,7 +56,7 @@ try {
 
   await page.screenshot({ path: 'test-results/01-desktop.png', fullPage: true });
   const fixturePath = path.join(temp, 'clientes-exemplo.csv');
-  fs.writeFileSync(fixturePath, 'Cliente;Telefone;Processo;Retorno;Proximo_Retorno;Data_Movimentacao;Andamento;Autorizado;Observacoes\nAna Exemplo;11999990001;00000000020268260000;24/09/2026;30/09/2026;25/09/2026;Despacho proferido;sim;\nBruno Exemplo;21999990002;00000010020268260000;25/09/2026;30/09/2026;24/09/2026;Distribuição;sim;\nAna Repetida;11999990001;00000000020268260000;24/09/2026;30/09/2026;25/09/2026;Despacho proferido;sim;\nCliente sem telefone;;00000020020268260000;24/09/2026;30/09/2026;25/09/2026;Movimento;sim;\nContato bloqueado;31999990003;00000030020268260000;24/09/2026;30/09/2026;25/09/2026;Movimento;sim;NÃO FALAR\n');
+  fs.writeFileSync(fixturePath, 'Cliente;Telefone;Protocolo;Retorno;Proximo_Retorno;Data_Movimentacao;Andamento;Autorizado;Observacoes\nAna Exemplo;11999990001;00000000020268260000;24/09/2026;30/09/2026;25/09/2026;Despacho proferido;sim;\nBruno Exemplo;21999990002;00000010020268260000;25/09/2026;30/09/2026;24/09/2026;Distribuição;sim;\nAna Repetida;11999990001;00000000020268260000;24/09/2026;30/09/2026;25/09/2026;Despacho proferido;sim;\nCliente sem telefone;;00000020020268260000;24/09/2026;30/09/2026;25/09/2026;Movimento;sim;\nContato bloqueado;31999990003;00000030020268260000;24/09/2026;30/09/2026;25/09/2026;Movimento;sim;NÃO FALAR\n');
   await (await page.$('#file-input')).uploadFile(fixturePath);
   await page.waitForFunction(() => !document.getElementById('mapping').classList.contains('hidden'));
   assert.equal(await page.$eval('#phone-column', el => el.value), 'Telefone');
@@ -102,7 +102,7 @@ try {
   await page.click('[data-page="processes"]');
   await page.waitForFunction(() => !document.getElementById('page-processes').classList.contains('hidden'));
   assert.match(await page.$eval('#page-processes', el => el.innerText), /Atualizações processuais automáticas/);
-  assert.equal(await page.$eval('#legal-process-column', el => el.value), 'Processo');
+  assert.equal(await page.$eval('#legal-process-column', el => el.value), 'Protocolo');
   assert.equal(await page.$eval('#legal-phone-column', el => el.value), 'Telefone');
   assert.equal(await page.$eval('#legal-consent-column', el => el.value), 'Autorizado');
   assert.equal(await page.$eval('#legal-last-return-column', el => el.value), 'Retorno');
