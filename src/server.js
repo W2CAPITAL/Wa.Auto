@@ -6,6 +6,7 @@ import { WhatsApp } from './whatsapp.js';
 import { Queue } from './queue.js';
 import { createApp } from './app.js';
 import { RemoteSnapshot } from './remote-snapshot.js';
+import { LegalMonitorService } from './legal-monitor.js';
 
 const dataDir = path.resolve(process.env.WA_DATA_DIR || path.join(os.tmpdir(), 'wa-auto-cloud'));
 fs.mkdirSync(dataDir, { recursive: true });
@@ -47,7 +48,10 @@ const queue = new Queue(store, transport);
 queue.on('change', persist);
 queue.on('queueError', persist);
 
-const app = createApp({ store, transport, queue, onMutation: persist });
+const legalMonitor = new LegalMonitorService(store, transport, { onMutation: persist });
+legalMonitor.start();
+
+const app = createApp({ store, transport, queue, legalMonitor, onMutation: persist });
 const port = Number(process.env.PORT || 10000);
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`\nWA.Auto Cloud está pronto na porta ${port}.\n`);
@@ -68,6 +72,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   clearInterval(persistTimer);
+  legalMonitor.stop();
   server.close();
   const deadline = setTimeout(() => process.exit(1), 20000);
   deadline.unref();
