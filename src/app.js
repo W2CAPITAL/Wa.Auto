@@ -5,12 +5,26 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { parseSpreadsheet } from './importer.js';
 import { analyzeContacts, createCampaign, prepareCampaign, csvReport } from './campaigns.js';
-import { affirmative, blockedInRow, normalizePhone } from './phone.js';
+import { affirmative, blockedInRow, normalizePhone, fold } from './phone.js';
 import { AppError, requireValue } from './errors.js';
-import { normalizeCnj, resolveDataJudAlias } from './legal-monitor.js';
+import { normalizeCnj, resolveDataJudAlias, parseClientDate } from './legal-monitor.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
+const headerMatch = (sheet, patterns) => sheet.headers.find(header => patterns.some(pattern => pattern.test(fold(header)))) || '';
+const legalSheetColumns = (sheet, body = {}) => ({
+  processColumn: sheet.headers.includes(body.processColumn) ? body.processColumn : headerMatch(sheet, [/^protocolo$/, /protocolo.*ref/, /processo/, /^cnj$/]),
+  phoneColumn: sheet.headers.includes(body.phoneColumn) ? body.phoneColumn : headerMatch(sheet, [/^telefone$/, /celular/, /whats/, /fone/]),
+  nameColumn: sheet.headers.includes(body.nameColumn) ? body.nameColumn : headerMatch(sheet, [/^cliente$/, /^nome$/, /parte/]),
+  consentColumn: sheet.headers.includes(body.consentColumn) ? body.consentColumn : headerMatch(sheet, [/autoriz/, /consent/, /opt.?in/, /whats.*ok/]),
+  lastReturnColumn: sheet.headers.includes(body.lastReturnColumn) ? body.lastReturnColumn : headerMatch(sheet, [/^retorno$/, /ultimo.*retorno/, /ultimo_retorno/]),
+  nextReturnColumn: sheet.headers.includes(body.nextReturnColumn) ? body.nextReturnColumn : headerMatch(sheet, [/proximo.*retorno/, /proximo_retorno/]),
+  movementDateColumn: sheet.headers.includes(body.movementDateColumn) ? body.movementDateColumn : headerMatch(sheet, [/data.*moviment/, /datajud.*ultimo.*movimento/, /ultima.*moviment.*data/]),
+  movementTextColumn: sheet.headers.includes(body.movementTextColumn) ? body.movementTextColumn : headerMatch(sheet, [/^andamento$/, /datajud.*ultimo.*nome/, /^ultima_movimentacao$/, /ultima.*moviment/]),
+  djenDateColumn: sheet.headers.includes(body.djenDateColumn) ? body.djenDateColumn : headerMatch(sheet, [/djen.*ultima.*data/, /data.*djen/]),
+  djenTextColumn: sheet.headers.includes(body.djenTextColumn) ? body.djenTextColumn : headerMatch(sheet, [/djen.*resumo/, /djen.*ultimo.*resumo/]),
+  lastNotifiedColumn: sheet.headers.includes(body.lastNotifiedColumn) ? body.lastNotifiedColumn : headerMatch(sheet, [/alert.*delivered/, /ultimo.*aviso/, /ultima.*notificacao/]),
+});
 export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
@@ -145,49 +159,99 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
       phone,
       tribunalAlias:resolveDataJudAlias(cnj),
       mode,
-      notifyWhatsapp:req.body?.notifyWhatsapp !== false
+      notifyWhatsapp:req.body?.notifyWhatsapp !== false,
+      lastReturnAt:parseClientDate(req.body?.lastReturnAt, { endOfDay:true })
     });
-    const scan = await legalMonitor.scanOne(monitor, { seedOnly:true });
+    if (req.body?.lastReturnAt) legalMonitor.syncSpreadsheetSnapshot(monitor, { lastReturnAt:req.body.lastReturnAt });
+    const scan = await legalMonitor.scanOne(store.legalMonitor(monitor.id), { seedOnly:true });
     res.status(201).json({ monitor:store.legalMonitor(monitor.id), scan, events:store.legalEvents(monitor.id, 20) });
   });
   app.post('/api/legal/monitors/import', async (req, res) => {
     requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
     const imported = store.getImport(req.body?.importId);
-    const sheet = imported.sheets.find(item => item.name === req.body?.sheet);
+    const sheet = imported.sheets.find(item => item.name === req.body?.sheet) || imported.sheets.find(item => /^processos?$/i.test(item.name)) || imported.sheets[0];
     requireValue(sheet, 'Selecione uma aba válida.');
-    requireValue(sheet.headers.includes(req.body?.processColumn), 'Selecione a coluna do processo.');
-    requireValue(sheet.headers.includes(req.body?.phoneColumn), 'Selecione a coluna de telefone.');
-    const nameColumn = sheet.headers.includes(req.body?.nameColumn) ? req.body.nameColumn : '';
-    const consentColumn = sheet.headers.includes(req.body?.consentColumn) ? req.body.consentColumn : '';
+    const columns = legalSheetColumns(sheet, req.body || {});
+    requireValue(columns.processColumn, 'Não encontrei a coluna do processo. Na sua planilha, use Protocolo/CNJ/Processo.');
+    requireValue(columns.phoneColumn, 'Não encontrei a coluna de telefone.');
+
     const blockedPhones = new Set(
       sheet.rows
         .filter(row => blockedInRow(row.values))
-        .map(row => normalizePhone(row.values[req.body.phoneColumn], '55').phone)
+        .map(row => normalizePhone(row.values[columns.phoneColumn], '55').phone)
         .filter(Boolean)
     );
+
     let created = 0, invalid = 0, blocked = 0, withoutConsent = 0, duplicates = 0;
+    let queued = 0, baseline = 0, covered = 0, missingReturn = 0, withKnownMovement = 0;
     const ids = [];
     const seen = new Set();
+
     for (const row of sheet.rows) {
-      const cnj = normalizeCnj(row.values[req.body.processColumn]);
-      const { phone } = normalizePhone(row.values[req.body.phoneColumn], '55');
+      const cnj = normalizeCnj(row.values[columns.processColumn]);
+      const { phone } = normalizePhone(row.values[columns.phoneColumn], '55');
       if (!cnj || !phone) { invalid++; continue; }
       if (blockedInRow(row.values) || blockedPhones.has(phone) || store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { blocked++; continue; }
-      if (consentColumn && !affirmative(row.values[consentColumn])) { withoutConsent++; continue; }
+      if (columns.consentColumn && !affirmative(row.values[columns.consentColumn])) { withoutConsent++; continue; }
+
       const key = `${cnj}:${phone}`;
       if (seen.has(key)) { duplicates++; continue; }
       seen.add(key);
+
+      const lastReturnRaw = columns.lastReturnColumn ? row.values[columns.lastReturnColumn] : '';
+      const nextReturnRaw = columns.nextReturnColumn ? row.values[columns.nextReturnColumn] : '';
+      const movementAtRaw = columns.movementDateColumn ? row.values[columns.movementDateColumn] : '';
+      const movementText = columns.movementTextColumn ? row.values[columns.movementTextColumn] : '';
+      const djenAtRaw = columns.djenDateColumn ? row.values[columns.djenDateColumn] : '';
+      const djenText = columns.djenTextColumn ? row.values[columns.djenTextColumn] : '';
+      const lastNotifiedRaw = columns.lastNotifiedColumn ? row.values[columns.lastNotifiedColumn] : '';
+      if (!parseClientDate(lastReturnRaw, { endOfDay:true })) missingReturn++;
+      if (parseClientDate(movementAtRaw) && String(movementText || '').trim()) withKnownMovement++;
+
       const monitor = store.createLegalMonitor({
         cnj,
-        clientName:String(nameColumn ? row.values[nameColumn] || 'Cliente' : 'Cliente').trim().slice(0,160) || 'Cliente',
+        clientName:String(columns.nameColumn ? row.values[columns.nameColumn] || 'Cliente' : 'Cliente').trim().slice(0,160) || 'Cliente',
         phone,
         tribunalAlias:resolveDataJudAlias(cnj),
         mode:['datajud','djen','both'].includes(req.body?.mode) ? req.body.mode : 'both',
-        notifyWhatsapp:req.body?.notifyWhatsapp !== false
+        notifyWhatsapp:req.body?.notifyWhatsapp !== false,
+        lastReturnAt:parseClientDate(lastReturnRaw, { endOfDay:true }),
+        nextReturnAt:parseClientDate(nextReturnRaw, { endOfDay:true }),
+        sheetMovementAt:parseClientDate(movementAtRaw),
+        sheetMovementText:String(movementText || ''),
+        lastNotifiedAt:parseClientDate(lastNotifiedRaw),
+        sourceImportId:imported.id,
+        sourceSheet:sheet.name,
+        sourceRow:row.id
       });
-      ids.push(monitor.id); created++;
+
+      const sync = legalMonitor.syncSpreadsheetSnapshot(monitor, {
+        lastReturnAt:lastReturnRaw,
+        nextReturnAt:nextReturnRaw,
+        movementAt:movementAtRaw,
+        movementText,
+        djenAt:djenAtRaw,
+        djenText,
+        lastNotifiedAt:lastNotifiedRaw,
+        sourceImportId:imported.id,
+        sourceSheet:sheet.name,
+        sourceRow:row.id
+      });
+      queued += sync.queued;
+      baseline += sync.baseline;
+      covered += sync.covered;
+      ids.push(monitor.id);
+      created++;
     }
-    res.status(201).json({ created, invalid, blocked, withoutConsent, duplicates, monitors:ids });
+
+    // Se o WhatsApp já estiver conectado, dispara no máximo um aviso agora.
+    // O restante continua na fila automática com espaçamento, sem travar a importação.
+    const delivery = await legalMonitor.sendPendingNotifications({ maxGroups:1 });
+    res.status(201).json({
+      created, invalid, blocked, withoutConsent, duplicates, queued, baseline, covered,
+      missingReturn, withKnownMovement, sentNow:delivery.sent || 0, waiting:delivery.waiting || 0,
+      columns, sheet:sheet.name, monitors:ids
+    });
   });
   app.post('/api/legal/monitors/:id/toggle', (req, res) => {
     const current = store.legalMonitor(req.params.id);
