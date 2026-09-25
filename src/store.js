@@ -56,6 +56,7 @@ export class Store {
     this.db.prepare("UPDATE campaigns SET status='paused',reason='Aplicativo reiniciado. Confira o histórico antes de continuar.' WHERE status='running'").run();
     this.db.prepare("UPDATE recipients SET status='uncertain',reason='O aplicativo fechou durante o envio. Confira a conversa; não haverá reenvio automático.' WHERE status='sending'").run();
     this.db.prepare("UPDATE recipients SET status='pending' WHERE status='resolving'").run();
+    this.db.prepare("UPDATE legal_events SET send_status='uncertain',error='O servidor reiniciou durante o envio. O aviso não será reenviado automaticamente.' WHERE send_status='sending'").run();
   }
   checkpoint() { try { this.db.exec('PRAGMA wal_checkpoint(FULL)'); } catch {} }
   close() { this.db.close(); }
@@ -170,6 +171,50 @@ export class Store {
   markLegalEvent(id, { sendStatus, messageId = null, error = '' }) {
     this.db.prepare('UPDATE legal_events SET send_status=?,message_id=?,sent_at=?,error=? WHERE id=?')
       .run(sendStatus, messageId, sendStatus === 'sent' ? iso() : null, error, id);
+  }
+  recoverCriticalIntent(intent) {
+    if (!intent?.kind || !intent?.payload) return { recovered:false };
+    if (intent.kind === 'campaign') {
+      const entryId = Number(intent.payload.entryId);
+      const row = Number.isInteger(entryId) ? this.entry(entryId) : null;
+      if (row && ['pending','resolving','sending'].includes(row.status)) {
+        this.updateEntry(entryId, {
+          status:'uncertain',
+          reason:'O servidor reiniciou perto do momento do envio. Confira a conversa; o WA.Auto não reenviará automaticamente.'
+        });
+        const campaign = this.campaign(row.campaign_id);
+        if (campaign.status === 'running') this.setCampaign(row.campaign_id, 'paused', 'Envio interrompido por reinício. Confira a linha marcada antes de continuar.');
+        return { recovered:true, kind:'campaign', entryId };
+      }
+      return { recovered:false, kind:'campaign', entryId };
+    }
+    if (intent.kind === 'legal') {
+      const ids = Array.isArray(intent.payload.eventIds) ? intent.payload.eventIds.map(String) : [];
+      let changed = 0;
+      const get = this.db.prepare('SELECT id,send_status FROM legal_events WHERE id=?');
+      for (const id of ids) {
+        const event = get.get(id);
+        if (event && ['waiting','sending'].includes(event.send_status)) {
+          this.markLegalEvent(id, {
+            sendStatus:'uncertain',
+            error:'O servidor reiniciou perto do envio deste alerta. Ele não será reenviado automaticamente.'
+          });
+          changed++;
+        }
+      }
+      return { recovered:changed > 0, kind:'legal', events:changed };
+    }
+    return { recovered:false };
+  }
+
+  pruneHistory(retentionDays = 30) {
+    const days = Math.max(0, Math.min(Number(retentionDays) || 0, 3650));
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    return this.transaction(() => {
+      const legal = this.db.prepare("DELETE FROM legal_events WHERE created_at<? AND send_status NOT IN ('waiting','sending','uncertain')").run(cutoff).changes;
+      const campaigns = this.db.prepare("DELETE FROM campaigns WHERE created_at<? AND status IN ('completed','cancelled')").run(cutoff).changes;
+      return { legal, campaigns, cutoff };
+    });
   }
   legalStats() {
     const monitored = Number(this.db.prepare('SELECT COUNT(*) AS n FROM legal_monitors WHERE enabled=1').get()?.n || 0);
