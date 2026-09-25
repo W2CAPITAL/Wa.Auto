@@ -6,14 +6,24 @@ Não exige CNPJ, cadastro de empresa na Meta, API paga, chave de IA ou mensalida
 
 ## Começar no Windows
 
-1. Instale o **Node.js 24 LTS** pelo [site oficial](https://nodejs.org/en/download).
-2. Baixe este repositório em **Code → Download ZIP** e extraia a pasta. Não execute dentro do ZIP.
-3. Abra **`INICIAR-WINDOWS.cmd`**. Na primeira execução ele instala as dependências e baixa o navegador usado na conexão. As próximas aberturas reutilizam a instalação.
-4. O aplicativo abre em **http://127.0.0.1:3210**. Mantenha a janela do programa aberta.
-5. O WA.Auto já inicia a conexão automaticamente e exibe o **QR Code**. No celular, abra **WhatsApp → Aparelhos conectados → Conectar aparelho**. Se a conexão cair, use **WhatsApp desconectado → Gerar QR Code**.
-6. Importe sua planilha, escolha aba e colunas, escreva a mensagem e clique em **Revisar destinatários**.
-7. Confira os números, desmarque linhas se necessário e use **Enviar um teste para mim**. Esse botão envia uma mensagem real para o telefone indicado.
-8. Dê um nome à campanha, clique em **Salvar campanha** e confira a mensagem e os destinatários. Marque a revisão e clique em **Iniciar envios**.
+### Opção recomendada: pacote portátil
+
+A automação do GitHub gera o artefato **WA.Auto-Windows**. Ele já contém o runtime Node e as dependências usadas pelo motor local.
+
+1. Baixe **WA.Auto-Windows** na execução mais recente de **Actions → Verificar WA.Auto**.
+2. Extraia todo o ZIP para uma pasta normal. Não execute de dentro do ZIP.
+3. Abra **`INICIAR-WA.AUTO.cmd`**.
+4. O motor é testado em **http://127.0.0.1:3210** e o painel local abre automaticamente.
+5. Conecte pelo **QR Code**. Se preferir ou se o QR falhar, informe seu telefone com DDD e use **Gerar código de pareamento**; no celular, escolha **Aparelhos conectados → Conectar aparelho → Conectar com número de telefone**.
+6. Importe sua planilha, escolha a coluna de telefone, escreva a mensagem e clique em **Revisar destinatários**.
+7. Use **Enviar um teste para mim** antes da campanha completa.
+8. Salve a campanha, confirme a revisão e clique em **Iniciar envios**.
+
+### Opção pelo código-fonte
+
+Baixe este repositório em **Code → Download ZIP**, extraia e execute **`INICIAR-WINDOWS.cmd`**. Se o Node 24 não estiver instalado, o próprio inicializador baixa uma cópia portátil oficial do Node. Em seguida ele instala as dependências e inicia o motor.
+
+O endereço **https://whatsappautomat.vercel.app** é apenas o painel hospedado. O QR Code, a sessão do WhatsApp, o SQLite e os envios continuam no motor do seu PC. Se `127.0.0.1:3210/api/bootstrap` estiver recusando conexão, o motor não está rodando; execute um dos inicializadores acima.
 
 O primeiro teste real depende de conectar a sua conta. Nenhuma mensagem é disparada apenas por importar a planilha, salvar um rascunho, abrir a página ou reiniciar o aplicativo.
 
@@ -39,7 +49,7 @@ Abra **http://127.0.0.1:3210** no mesmo computador. Node 24 inclui SQLite; não 
 - Exclusão de vazios, formatos inválidos, telefones repetidos e dados ausentes exigidos na mensagem.
 - Respeito a “NÃO FALAR”, “NÃO CONTATAR” e colunas de bloqueio na planilha, inclusive se outra linha do mesmo telefone contém a indicação.
 - Coluna de autorização opcional: quando escolhida, apenas linhas com `sim`, `1`, `true`, `autorizado` ou equivalentes entram.
-- Conexão real por QR Code com sessão salva localmente.
+- Conexão real por QR Code **ou código de pareamento por telefone**, com sessão salva localmente.
 - Consulta ao WhatsApp para verificar se o número está registrado, antes do envio.
 - Uma campanha ativa por vez, intervalo configurável, pausa, continuação e cancelamento.
 - Banco SQLite com mensagens congeladas por campanha e recuperação após reiniciar.
