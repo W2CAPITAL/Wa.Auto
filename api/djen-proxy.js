@@ -36,14 +36,15 @@ async function queryOnce(cnj, start, end, page) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ ok:false, error:'Method not allowed' });
-  const digits = digitsOnly(req.body?.cnj);
+  if (!['GET','POST'].includes(req.method)) return res.status(405).json({ ok:false, error:'Method not allowed' });
+  const input = req.method === 'GET' ? req.query : req.body;
+  const digits = digitsOnly(input?.cnj);
   if (digits.length !== 20) return res.status(400).json({ ok:false, error:'CNJ inválido' });
 
   const now = new Date();
-  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.end || '')) ? String(req.body.end) : now.toISOString().slice(0,10);
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(input?.end || '')) ? String(input.end) : now.toISOString().slice(0,10);
   const fallbackStart = new Date(now.getTime() - 365 * 86400000).toISOString().slice(0,10);
-  const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.start || '')) ? String(req.body.start) : fallbackStart;
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(String(input?.start || '')) ? String(input.start) : fallbackStart;
 
   let lastError = null;
   for (const cnj of [digits, maskCnj(digits)]) {
