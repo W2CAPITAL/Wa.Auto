@@ -155,51 +155,140 @@ export async function fetchDataJudProcess(cnj, { fetchImpl = fetch, apiKey = pro
   }
 }
 
-export async function fetchDjenProcess(cnj, { fetchImpl = fetch, days = 120 } = {}) {
+export async function fetchDjenProcess(cnj, { fetchImpl = fetch, days = 365 } = {}) {
   const digits = normalizeCnj(cnj);
   if (!digits) return { ok:false, source:'DJEN', error:'Número CNJ inválido.', events:[] };
-  const end = new Date();
-  const start = new Date(Date.now() - Math.max(1, Math.min(Number(days) || 120, 365)) * 86400000);
-  const params = new URLSearchParams({
-    numeroProcesso:digits,
-    dataDisponibilizacaoInicio:start.toISOString().slice(0,10),
-    dataDisponibilizacaoFim:end.toISOString().slice(0,10),
-    pagina:'1',
-    itensPorPagina:'100'
-  });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 28000);
-  try {
-    const response = await fetchImpl(`${DJEN_URL}?${params}`, { headers:{ Accept:'application/json' }, signal:controller.signal });
-    if (response.status === 403) return { ok:false, source:'DJEN', blocked:true, status:403, error:'DJEN recusou temporariamente a rede do servidor (403).', events:[] };
-    if (response.status === 429) return { ok:false, source:'DJEN', rateLimited:true, status:429, error:'DJEN pediu pausa por excesso de consultas (429).', events:[] };
-    const raw = await response.text();
-    const trimmed = raw.trim();
-    if (!response.ok || !trimmed || trimmed.startsWith('<')) return { ok:false, source:'DJEN', status:response.status, error:`DJEN indisponível (HTTP ${response.status}).`, events:[] };
-    let data;
-    try { data = JSON.parse(trimmed); }
-    catch { return { ok:false, source:'DJEN', error:'DJEN retornou uma resposta inválida.', events:[] }; }
-    const items = parseDjenItems(data);
-    const events = items.map(item => {
-      const at = eventTime(item.data_disponibilizacao || item.dataDisponibilizacao || item.data);
-      const title = String(item.tipoComunicacao || item.nomeClasse || 'Publicação DJEN').trim().slice(0,500);
-      const details = plainText(item.texto || '').slice(0,4000);
-      const identifier = item.hash || item.id || '';
-      return {
-        source:'DJEN',
-        eventAt:at,
-        title,
-        details,
-        link: item.link || (item.hash ? `https://comunica.pje.jus.br/consulta?hash=${encodeURIComponent(item.hash)}` : ''),
-        hash:sha(`DJEN|${digits}|${identifier}|${at}|${title}|${details}`)
-      };
-    }).sort((a,b) => b.eventAt.localeCompare(a.eventAt));
-    return { ok:true, source:'DJEN', events };
-  } catch (error) {
-    return { ok:false, source:'DJEN', error:error?.name === 'AbortError' ? 'Tempo esgotado ao consultar o DJEN.' : 'Falha de rede ao consultar o DJEN.', events:[] };
-  } finally {
-    clearTimeout(timeout);
+
+  const endDate = new Date();
+  const startDate = new Date(Date.now() - Math.max(1, Math.min(Number(days) || 365, 365)) * 86400000);
+  const end = endDate.toISOString().slice(0,10);
+  const start = startDate.toISOString().slice(0,10);
+  const masked = formatCnj(digits);
+
+  const normalizeItems = data => parseDjenItems(data).map(item => {
+    const at = eventTime(
+      item.data_disponibilizacao ||
+      item.dataDisponibilizacao ||
+      item.datadisponibilizacao ||
+      item.data
+    );
+    const title = String(
+      item.tipoComunicacao ||
+      item.tipocomunicacao ||
+      item.nomeClasse ||
+      item.nomeclasse ||
+      'Publicação DJEN'
+    ).trim().slice(0,500);
+    const details = plainText(
+      item.texto ||
+      item.conteudo ||
+      item.textoPublicacao ||
+      item.descricao ||
+      item.inteiroTeor ||
+      item.resumo ||
+      ''
+    ).slice(0,4000);
+    const identifier = item.hash || item.id || item.comunicacao_id || '';
+    return {
+      source:'DJEN',
+      eventAt:at,
+      title,
+      details,
+      link:item.link || (item.hash ? `https://comunica.pje.jus.br/consulta?hash=${encodeURIComponent(item.hash)}` : ''),
+      hash:sha(`DJEN|${digits}|${identifier}|${at}|${title}|${details}`)
+    };
+  }).filter(event => event.eventAt > '1971-01-01T00:00:00.000Z');
+
+  const headers = {
+    Accept:'application/json',
+    'Accept-Language':'pt-BR,pt;q=0.9',
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36',
+    Origin:'https://comunica.pje.jus.br',
+    Referer:'https://comunica.pje.jus.br/'
+  };
+
+  async function queryOfficial(processNumber) {
+    const collected = [];
+    let total = 0;
+    for (let page = 1; page <= 20; page++) {
+      const params = new URLSearchParams({
+        numeroProcesso:processNumber,
+        dataDisponibilizacaoInicio:start,
+        dataDisponibilizacaoFim:end,
+        pagina:String(page),
+        itensPorPagina:'50'
+      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 28000);
+      try {
+        const response = await fetchImpl(`${DJEN_URL}?${params}`, { headers, signal:controller.signal });
+        if (response.status === 403) return { ok:false, source:'DJEN', blocked:true, status:403, error:'DJEN recusou a região do servidor (403).', events:[] };
+        if (response.status === 429) return { ok:false, source:'DJEN', rateLimited:true, status:429, error:'DJEN pediu pausa por excesso de consultas (429).', events:[] };
+        const raw = await response.text();
+        const trimmed = raw.trim();
+        if (!response.ok || !trimmed || trimmed.startsWith('<')) {
+          return { ok:false, source:'DJEN', status:response.status, error:`DJEN indisponível (HTTP ${response.status}).`, events:[] };
+        }
+        let data;
+        try { data = JSON.parse(trimmed); }
+        catch { return { ok:false, source:'DJEN', error:'DJEN retornou uma resposta inválida.', events:[] }; }
+
+        const items = Array.isArray(data?.items) ? data.items : parseDjenItems(data);
+        total = Math.max(total, Number(data?.count || 0));
+        collected.push(...items);
+        if (!items.length || items.length < 50 || collected.length >= total && total > 0) break;
+      } catch (error) {
+        return { ok:false, source:'DJEN', error:error?.name === 'AbortError' ? 'Tempo esgotado ao consultar o DJEN.' : 'Falha de rede ao consultar o DJEN.', events:[] };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    return { ok:true, source:'DJEN', count:total || collected.length, events:normalizeItems({ items:collected }).sort((a,b) => b.eventAt.localeCompare(a.eventAt)) };
   }
+
+  // A API aceita CNJ sem máscara na maioria dos casos; alguns registros históricos respondem
+  // somente ao formato mascarado. Tenta os dois antes de concluir que não há publicação.
+  let direct = await queryOfficial(digits);
+  if (direct.ok && direct.events.length) return direct;
+  if (direct.ok && !direct.events.length) {
+    const maskedResult = await queryOfficial(masked);
+    if (maskedResult.ok && maskedResult.events.length) return maskedResult;
+    if (maskedResult.ok) return direct;
+    direct = maskedResult;
+  }
+
+  // Comunica PJe bloqueia datacenters fora do Brasil. O Render atual roda em Ohio,
+  // então usamos um proxy próprio e restrito, implantado no Vercel gru1 (São Paulo).
+  if (direct.blocked || direct.status === 403) {
+    const proxyCandidates = [
+      process.env.DJEN_PROXY_URL,
+      'https://whatsappautomat-w2-capital.vercel.app/api/djen-proxy',
+      'https://whatsappautomat.vercel.app/api/djen-proxy'
+    ].filter(Boolean);
+    for (const proxyUrl of proxyCandidates) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 28000);
+      try {
+        const response = await fetchImpl(proxyUrl, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json', Accept:'application/json' },
+          body:JSON.stringify({ cnj:digits, start, end }),
+          signal:controller.signal
+        });
+        if (!response.ok) continue;
+        const data = await response.json();
+        if (!data?.ok) continue;
+        const events = normalizeItems({ items:Array.isArray(data.items) ? data.items : [] }).sort((a,b) => b.eventAt.localeCompare(a.eventAt));
+        return { ok:true, source:'DJEN', viaProxy:true, proxyRegion:data.region || 'gru1', count:Number(data.count || events.length), events };
+      } catch {
+        // tenta o próximo alias do mesmo proxy
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  return direct;
 }
 
 export function formatProcessMessage(monitor, event) {
