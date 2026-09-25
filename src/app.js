@@ -15,20 +15,30 @@ export function createApp({ store, transport, queue, onMutation = () => {} }) {
   const csrfToken = randomBytes(32).toString('hex');
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
   app.disable('x-powered-by');
+  app.set('trust proxy', true);
   app.use((req, res, next) => {
     res.set({
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin', 'Cache-Control': 'no-store',
     });
-    const host = req.headers.host || '';
+
+    const isApi = req.path.startsWith('/api/');
+    if (!isApi) return next();
+
+    const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+    const origin = String(req.headers.origin || '').replace(/\/$/, '');
+    const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+    const host = forwardedHost || req.headers.host || '';
     const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-    const protocol = forwardedProto || req.protocol || 'http';
+    const protocol = forwardedProto || req.protocol || 'https';
     const requestOrigin = host ? `${protocol}://${host}` : '';
     const configuredOrigin = String(process.env.WA_PUBLIC_ORIGIN || '').replace(/\/$/, '');
-    const origin = req.headers.origin;
-    if (origin && origin !== requestOrigin && (!configuredOrigin || origin !== configuredOrigin)) return res.status(403).json({ error: 'Origem não permitida.' });
-    if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
-    if (req.path.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers['x-wa-csrf'] !== csrfToken) return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
+
+    if (isMutation) {
+      if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
+      if (origin && origin !== requestOrigin && (!configuredOrigin || origin !== configuredOrigin)) return res.status(403).json({ error: 'Origem não permitida.' });
+      if (req.headers['x-wa-csrf'] !== csrfToken) return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
+    }
     next();
   });
   app.use(express.json({ limit: '2mb' }));
