@@ -56,8 +56,10 @@ try {
   process.exit(1);
 }
 
-const retentionDays = Math.max(0, Math.min(Number(process.env.WA_HISTORY_RETENTION_DAYS ?? 30), 3650));
-store.pruneHistory(retentionDays);
+const defaultRetentionDays = Math.max(0, Math.min(Number(process.env.WA_HISTORY_RETENTION_DAYS ?? 30), 3650));
+if (store.getMeta('historyRetentionDays') == null) store.setMeta('historyRetentionDays', String(defaultRetentionDays));
+const retentionDays = () => Math.max(0, Math.min(Number(store.getMeta('historyRetentionDays') ?? defaultRetentionDays), 3650));
+store.pruneHistory(retentionDays());
 
 const persist = () => snapshot.schedule(dataDir, store);
 const resourceGuard = new ResourceGuard();
@@ -100,8 +102,8 @@ const resourceTimer = setInterval(() => {
 resourceTimer.unref?.();
 
 const pruneTimer = setInterval(() => {
-  const removed = store.pruneHistory(retentionDays);
-  if (removed.legal || removed.campaigns) persist();
+  const removed = store.pruneHistory(retentionDays());
+  if (removed.legalScrubbed || removed.campaigns) persist();
 }, 6 * 60 * 60 * 1000);
 pruneTimer.unref?.();
 
