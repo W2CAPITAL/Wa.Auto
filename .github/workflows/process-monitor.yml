@@ -15,10 +15,11 @@ jobs:
     timeout-minutes: 12
     steps:
       - name: Acordar WA.Auto
+        shell: bash
         run: |
           set -euo pipefail
           for i in $(seq 1 18); do
-            if curl --fail --show-error --silent --connect-timeout 15 --max-time 45               "https://wa-auto-cloud.onrender.com/api/health" >/tmp/health.json; then
+            if curl --fail --show-error --silent --connect-timeout 15 --max-time 45 "https://wa-auto-cloud.onrender.com/api/health" >/tmp/health.json; then
               cat /tmp/health.json
               break
             fi
@@ -30,25 +31,16 @@ jobs:
           done
 
       - name: Verificar DataJud e DJEN
+        shell: bash
         run: |
           set -euo pipefail
           ok=0
           for i in $(seq 1 6); do
-            if curl --fail --show-error --silent --connect-timeout 20 --max-time 240               "https://wa-auto-cloud.onrender.com/api/legal/cron" | tee /tmp/scan.json; then
+            if curl --fail --show-error --silent --connect-timeout 20 --max-time 240 "https://wa-auto-cloud.onrender.com/api/legal/cron" | tee /tmp/scan.json; then
               ok=1
               break
             fi
             sleep 20
           done
           [ "$ok" -eq 1 ] || { echo "Varredura jurídica falhou após tentativas."; exit 1; }
-          python - <<'PY'
-import json
-data=json.load(open('/tmp/scan.json'))
-print("checked:", data.get("checked", 0))
-print("newEvents:", data.get("newEvents", 0))
-print("sent:", data.get("sent", 0))
-print("failed:", data.get("failed", 0))
-print("skipped:", data.get("skipped", False), data.get("reason", ""))
-if data.get("reason") == "memory-pressure":
-    print("Varredura adiada por proteção de memória; próximo ciclo tentará novamente.")
-PY
+          python -c 'import json; d=json.load(open("/tmp/scan.json")); print("checked:",d.get("checked",0)); print("newEvents:",d.get("newEvents",0)); print("sent:",d.get("sent",0)); print("failed:",d.get("failed",0)); print("skipped:",d.get("skipped",False),d.get("reason","")); print("Varredura adiada por proteção de memória; próximo ciclo tentará novamente." if d.get("reason")=="memory-pressure" else "")'
