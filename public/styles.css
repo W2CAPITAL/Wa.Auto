@@ -248,3 +248,6 @@ dialog::backdrop{background:rgba(20,36,30,.38);backdrop-filter:blur(5px)}
   .settings-grid,.help-grid{grid-template-columns:1fr}.block-form{grid-template-columns:1fr}.history-row{align-items:flex-start;flex-wrap:wrap}.history-info{min-width:180px}
   .qr-layout{grid-template-columns:1fr;margin:0 14px}.connection-tabs,.secure-box,.modal-divider{margin-left:14px;margin-right:14px}.wide-option-button{margin-left:14px;margin-right:14px;width:calc(100% - 28px)}.connection-modal-header{padding:16px 14px}.connection-actions{padding:0 14px 16px}.phone-connect-card{margin:0 14px 14px}
 }
+
+.contact-more{border:0;background:transparent;color:#84918a;border-radius:6px;padding:6px 8px;font-weight:800;letter-spacing:1px}
+.contact-more:hover{background:#f0f4f2;color:#315347}
