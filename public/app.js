@@ -593,8 +593,12 @@ onClick('legal-refresh', async () => {
   toast(`Varredura concluída: ${number(result.checked)} processo(s), ${number(result.newEvents)} nova(s) movimentação(ões), ${number(result.sent)} aviso(s) enviado(s).`);
 });
 $('legal-import-sheet').addEventListener('change', configureLegalImport);
-for (const id of ['legal-process-column','legal-phone-column','legal-name-column','legal-consent-column']) $(id).addEventListener('change', () => {
+for (const id of ['legal-process-column','legal-phone-column','legal-name-column','legal-last-return-column','legal-next-return-column','legal-movement-date-column','legal-movement-text-column','legal-consent-column']) $(id).addEventListener('change', () => {
   $('legal-import-button').disabled = !$('legal-process-column').value || !$('legal-phone-column').value;
+  const detected = [$('legal-last-return-column').value && 'retorno', $('legal-movement-date-column').value && 'data da movimentação', $('legal-movement-text-column').value && 'andamento'].filter(Boolean);
+  $('legal-import-result').textContent = detected.length === 3
+    ? 'Regra completa pronta: a planilha já tem último retorno + data da movimentação + andamento.'
+    : 'Para a regra automática completa, mapeie Último retorno, Data da movimentação e Andamento.';
 });
 onClick('legal-import-button', async () => {
   if (!state.imported) throw new Error('Importe uma planilha primeiro.');
