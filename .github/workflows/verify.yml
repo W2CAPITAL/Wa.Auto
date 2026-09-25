@@ -20,8 +20,10 @@ jobs:
         run: npm install --no-fund
       - name: Verificar codigo e testes
         run: npm run verify
-      - name: Instalar Chrome apenas para teste visual
-        run: npx puppeteer browsers install chrome
+      - name: Instalar navegador e ferramenta apenas para teste visual
+        run: |
+          npm install --no-save puppeteer@25.12.0
+          npx puppeteer browsers install chrome
       - name: Testar interface
         run: npm run test:browser
       - uses: actions/upload-artifact@v4
