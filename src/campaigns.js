@@ -1,3 +1,50 @@
+export function analyzeContacts(store, input) {
+  requireValue(typeof input.importId === 'string', 'Importe a planilha primeiro.');
+  const imported = store.getImport(input.importId);
+  const sheet = imported.sheets.find(item => item.name === input.sheet);
+  requireValue(sheet, 'Selecione uma aba válida.');
+  requireValue(sheet.headers.includes(input.phoneColumn), 'Escolha a coluna de telefone.');
+  requireValue(!input.nameColumn || sheet.headers.includes(input.nameColumn), 'A coluna de nome não existe nesta aba.');
+  const country = String(input.country || '55');
+  requireValue(/^[1-9]\d{0,2}$/.test(country), 'O código do país deve ter de 1 a 3 dígitos.');
+
+  const blockedPhones = new Set(
+    sheet.rows
+      .filter(row => blockedInRow(row.values))
+      .map(row => normalizePhone(row.values[input.phoneColumn], country).phone)
+      .filter(Boolean)
+  );
+  const seen = new Set();
+  const entries = sheet.rows.map(row => {
+    const rawPhone = String(row.values[input.phoneColumn] || '');
+    const { phone, error } = normalizePhone(rawPhone, country);
+    let status = 'valid';
+    let reason = '';
+    if (error) { status = 'invalid'; reason = error; }
+    else if (blockedInRow(row.values) || blockedPhones.has(phone) || store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) {
+      status = 'skipped'; reason = 'Não contatar: indicação na planilha ou lista de bloqueio';
+    } else if (seen.has(phone)) {
+      status = 'duplicate'; reason = 'Mesmo telefone já apareceu nesta carteira';
+    } else {
+      seen.add(phone);
+    }
+    return {
+      row: row.id,
+      name: String(input.nameColumn ? row.values[input.nameColumn] || `Linha ${row.id}` : `Linha ${row.id}`),
+      phone,
+      rawPhone,
+      status,
+      reason,
+    };
+  });
+  const counts = { total: entries.length, valid: 0, invalid: 0, duplicate: 0, skipped: 0, filled: 0 };
+  for (const entry of entries) {
+    if (entry.rawPhone.trim()) counts.filled++;
+    counts[entry.status] = (counts[entry.status] || 0) + 1;
+  }
+  return { entries, counts, filename: imported.filename, sheet: sheet.name };
+}
+
 import { affirmative, blockedInRow, normalizePhone } from './phone.js';
 import { requireValue } from './errors.js';
 import { renderTemplate, validateTemplate } from './template.js';
