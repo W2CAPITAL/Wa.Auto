@@ -5,6 +5,7 @@ on:
   pull_request:
 permissions:
   contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -28,3 +29,90 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  windows-portable:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci --no-fund
+      - name: Testar codigo no Windows
+        run: npm run verify
+      - name: Montar pacote portatil
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
+          New-Item $dist -ItemType Directory -Force | Out-Null
+          Copy-Item (Get-Command node).Source (Join-Path $dist 'node.exe')
+          Copy-Item 'src' (Join-Path $dist 'src') -Recurse
+          Copy-Item 'public' (Join-Path $dist 'public') -Recurse
+          Copy-Item 'node_modules' (Join-Path $dist 'node_modules') -Recurse
+          Copy-Item 'package.json' (Join-Path $dist 'package.json')
+          Copy-Item 'INICIAR-PORTATIL.cmd' (Join-Path $dist 'INICIAR-WA.AUTO.cmd')
+          @'
+          WA.Auto para Windows
+          =====================
+          1. Extraia todo o ZIP para uma pasta normal.
+          2. Dê dois cliques em INICIAR-WA.AUTO.cmd.
+          3. Mantenha a janela preta aberta durante os envios.
+          4. O painel abre em http://127.0.0.1:3210.
+          5. Conecte pelo QR Code ou pelo código de pareamento por telefone.
+
+          Este pacote inclui o runtime Node. Não execute diretamente de dentro do ZIP.
+          '@ | Set-Content (Join-Path $dist 'LEIA-ME.txt') -Encoding UTF8
+      - name: Validar runtime e modulo do WhatsApp no pacote
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
+          Push-Location $dist
+          & .\node.exe -e "import('whatsapp-web.js').then(m=>{const p=m.default||m;if(!p.Client||!p.LocalAuth)process.exit(2);console.log('whatsapp-web.js OK')})"
+          if ($LASTEXITCODE -ne 0) { throw 'whatsapp-web.js nao carregou no pacote portatil' }
+          Pop-Location
+      - name: Iniciar pacote e exigir api bootstrap
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
+          $env:WA_DATA_DIR = Join-Path $env:RUNNER_TEMP 'wa-auto-portable-data'
+          $env:WA_OPEN_BROWSER = '0'
+          $env:WA_AUTO_CONNECT = '0'
+          $process = Start-Process -FilePath (Join-Path $dist 'node.exe') -ArgumentList 'src/server.js' -WorkingDirectory $dist -PassThru -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'wa-auto-out.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'wa-auto-err.log')
+          try {
+            $ok = $false
+            for ($i=0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $r = Invoke-WebRequest 'http://127.0.0.1:3210/api/bootstrap' -UseBasicParsing -TimeoutSec 2
+                if ($r.StatusCode -eq 200) {
+                  $json = $r.Content | ConvertFrom-Json
+                  if (-not $json.csrfToken) { throw 'bootstrap sem csrfToken' }
+                  $ok = $true
+                  break
+                }
+              } catch {}
+              if ($process.HasExited) { break }
+            }
+            if (-not $ok) {
+              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-out.log') -ErrorAction SilentlyContinue
+              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-err.log') -ErrorAction SilentlyContinue
+              throw 'Pacote portatil nao respondeu em 127.0.0.1:3210/api/bootstrap'
+            }
+            Write-Host 'Pacote Windows respondeu /api/bootstrap com HTTP 200.'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WA.Auto-Windows
+          path: dist/WA.Auto-Windows/
+          retention-days: 30
+          compression-level: 6
