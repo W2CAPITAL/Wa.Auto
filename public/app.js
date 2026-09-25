@@ -1,10 +1,10 @@
 const $ = id => document.getElementById(id);
 const apiUrl = url => url;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const labels = { draft: 'Rascunho', running: 'Em andamento', paused: 'Pausada', completed: 'Concluída', cancelled: 'Cancelada', pending: 'Pronta para enviar', resolving: 'Conferindo número', sending: 'Enviando', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', uncertain: 'Conferir no WhatsApp', invalid: 'Revisar dados', duplicate: 'Repetido', skipped: 'Não contatar', excluded: 'Não selecionado', failed_delivery: 'Falha de entrega' };
+const labels = { draft: 'Rascunho', running: 'Em andamento', paused: 'Pausada', completed: 'Concluída', cancelled: 'Cancelada', valid: 'Válido', pending: 'Pronta para enviar', resolving: 'Conferindo número', sending: 'Enviando', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', uncertain: 'Conferir no WhatsApp', invalid: 'Revisar dados', duplicate: 'Repetido', skipped: 'Não contatar', excluded: 'Não selecionado', failed_delivery: 'Falha de entrega' };
 const badge = status => `<span class="badge ${escape(status)}">${escape(labels[status] || status)}</span>`;
 const number = value => Number(value || 0).toLocaleString('pt-BR');
-const state = { token: '', imported: null, connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
+const state = { token: '', imported: null, contacts: null, contactPage: 0, contactLoadSeq: 0, connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
 const PAGE_SIZE = 25;
 let toastTimer;
 
@@ -80,6 +80,7 @@ function configureSheet(saved = {}) {
   });
   if ($('filter-column').value) void perform(null, () => loadFilterValues(saved.filterValue));
   invalidate();
+  void loadContacts();
 }
 function setImport(imported, draft = {}) {
   state.imported = imported;
@@ -88,6 +89,10 @@ function setImport(imported, draft = {}) {
   $('upload-subtitle').textContent = `${imported.sheets.length} aba(s) · clique para trocar o arquivo`;
   const first = imported.sheets.find(sheet => sheet.suggestedPhone && sheet.rowCount) || imported.sheets[0];
   options($('sheet'), imported.sheets.map(sheet => sheet.name), draft.sheet || first.name, null);
+  if (!$('campaign-name').value.trim()) {
+    const base = imported.filename.replace(/\.(xlsx|csv)$/i, '').replace(/[_-]+/g, ' ').trim();
+    $('campaign-name').value = (`Envio — ${base}`).slice(0, 120);
+  }
   configureSheet(draft);
 }
 async function loadFilterValues(selected = '') {
@@ -100,6 +105,48 @@ async function loadFilterValues(selected = '') {
   $('filter-value').disabled = false;
   invalidate();
 }
+async function loadContacts() {
+  if (!state.imported || !$('phone-column').value) {
+    state.contacts = null;
+    $('import-contacts').classList.add('hidden');
+    refreshControls();
+    return;
+  }
+  const seq = ++state.contactLoadSeq;
+  const params = new URLSearchParams({
+    sheet: $('sheet').value,
+    phoneColumn: $('phone-column').value,
+    nameColumn: $('name-column').value,
+    country: $('country').value || '55',
+  });
+  const result = await api(`/api/imports/${state.imported.id}/contacts?${params}`);
+  if (seq !== state.contactLoadSeq) return;
+  state.contacts = result;
+  state.contactPage = 0;
+  renderImportedContacts();
+}
+
+function renderImportedContacts() {
+  if (!state.contacts) {
+    $('import-contacts').classList.add('hidden');
+    return;
+  }
+  const { entries, counts } = state.contacts;
+  $('import-contacts').classList.remove('hidden');
+  $('import-contact-summary').textContent = `${number(counts.valid)} contato(s) válido(s) para envio`;
+  const unusable = (counts.invalid || 0) + (counts.skipped || 0) + (counts.duplicate || 0);
+  $('import-contact-details').textContent = `${number(counts.total)} linhas · ${number(counts.filled)} telefone(s) preenchido(s) · ${number(counts.duplicate || 0)} repetido(s) · ${number(counts.skipped || 0)} não contatar · ${number(counts.invalid || 0)} vazio(s)/inválido(s)`;
+  $('send-all-valid').textContent = `Enviar para todos os ${number(counts.valid)} válidos →`;
+
+  const offset = state.contactPage * PAGE_SIZE;
+  const rows = entries.slice(offset, offset + PAGE_SIZE);
+  $('import-contact-rows').innerHTML = rows.map(row => `<tr><td>${row.row}</td><td>${escape(row.name)}</td><td>${escape(row.phone ? `+${row.phone}` : row.rawPhone || '—')}</td><td>${badge(row.status)}${row.reason ? `<div class="row-reason">${escape(row.reason)}</div>` : ''}</td></tr>`).join('');
+  $('import-contact-page-label').textContent = `${number(entries.length ? offset + 1 : 0)}–${number(Math.min(offset + PAGE_SIZE, entries.length))} de ${number(entries.length)}`;
+  $('import-contact-prev').disabled = state.contactPage === 0;
+  $('import-contact-next').disabled = offset + PAGE_SIZE >= entries.length;
+  refreshControls();
+}
+
 async function uploadFile(file) {
   if (!file) return;
   if (file.size > 15 * 1024 * 1024) throw new Error('A planilha deve ter até 15 MB.');
@@ -114,7 +161,13 @@ $('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remo
 $('drop-zone').addEventListener('drop', event => { event.preventDefault(); $('drop-zone').classList.remove('dragging'); void perform($('review'), () => uploadFile(event.dataTransfer.files[0])); });
 $('sheet').addEventListener('change', () => configureSheet());
 $('filter-column').addEventListener('change', () => void perform(null, () => loadFilterValues()));
-for (const id of ['phone-column', 'name-column', 'consent-column', 'filter-value', 'country', 'template']) $(id).addEventListener('input', invalidate);
+for (const id of ['consent-column', 'filter-value', 'template']) $(id).addEventListener('input', invalidate);
+for (const id of ['phone-column', 'name-column', 'country']) $(id).addEventListener('input', () => {
+  invalidate();
+  void perform(null, loadContacts);
+});
+$('import-contact-prev').addEventListener('click', () => { state.contactPage = Math.max(0, state.contactPage - 1); renderImportedContacts(); });
+$('import-contact-next').addEventListener('click', () => { state.contactPage++; renderImportedContacts(); });
 for (const id of ['campaign-name', 'interval']) $(id).addEventListener('input', saveDraft);
 
 function firstSelected() { return state.preview?.entries.find(row => row.status === 'pending' && state.selected.has(row.row)); }
@@ -129,13 +182,36 @@ onClick('sample-template', () => {
   $('template').value = `Olá${greeting}! Tudo bem?\n\nEntramos em contato para acompanhar seu atendimento. Podemos conversar por aqui?\n\nSe preferir não receber mensagens, responda SAIR.`;
   invalidate();
 });
-onClick('review', async () => {
+async function prepareAllRecipients() {
   state.preview = await api('/api/preview', { method: 'POST', body: fields() });
   state.selected = new Set(state.preview.entries.filter(row => row.status === 'pending').map(row => row.row));
   state.reviewPage = 0; state.saved = false;
   $('review-panel').classList.remove('hidden');
   renderReview(); renderMessage();
   $('review-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return state.preview;
+}
+onClick('review', prepareAllRecipients);
+onClick('send-all-valid', async () => {
+  if (!$('template').value.trim()) {
+    $('template').focus();
+    $('template').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    throw new Error('Escreva a mensagem antes de enviar para todos.');
+  }
+  if (state.connection.status !== 'ready') {
+    modal('connection-dialog');
+    throw new Error('Conecte o WhatsApp antes de iniciar o envio para todos.');
+  }
+  const preview = await prepareAllRecipients();
+  const count = preview.counts.pending || 0;
+  if (!count) throw new Error('Nenhum contato válido ficou disponível para envio.');
+  if (!confirm(`Enviar esta mensagem para todos os ${number(count)} contatos válidos da aba ${preview.sheet}? Repetidos, inválidos e “não contatar” serão excluídos.`)) return;
+  const campaign = await api('/api/campaigns', { method: 'POST', body: { ...fields(), selectedRows: [...state.selected] } });
+  await api(`/api/campaigns/${campaign.id}/start`, { method: 'POST', body: { reviewed: true } });
+  state.saved = true;
+  await poll();
+  await openCampaign(campaign.id);
+  toast(`Envio iniciado para ${number(count)} contato(s) válido(s).`);
 });
 function updateSelectionSummary() {
   const total = state.preview.entries.length;
@@ -266,6 +342,7 @@ function renderDetail() {
 function refreshControls() {
   const disable = (id, value) => { if ($(id).dataset.working !== 'true') $(id).disabled = !!value; };
   disable('review', !state.imported || !$('phone-column').value || !$('template').value.trim() || !state.online);
+  disable('send-all-valid', !state.contacts || !(state.contacts.counts.valid > 0) || !state.online);
   disable('save-campaign', !state.preview || !state.selected.size || state.saved || !state.online);
   disable('test-message', !state.preview || !state.selected.size || !state.online);
   disable('connect-action', !state.online);
