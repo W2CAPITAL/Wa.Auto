@@ -8,6 +8,7 @@ import { createApp } from './app.js';
 import { RemoteSnapshot } from './remote-snapshot.js';
 import { LegalMonitorService } from './legal-monitor.js';
 import { ResourceGuard } from './resource-guard.js';
+import { normalizePhone } from './phone.js';
 
 const dataDir = path.resolve(process.env.WA_DATA_DIR || path.join(os.tmpdir(), 'wa-auto-cloud'));
 fs.mkdirSync(dataDir, { recursive: true });
@@ -77,11 +78,51 @@ const legalMonitor = new LegalMonitorService(store, transport, {
 });
 legalMonitor.start();
 
+async function runOneOffReturnFromEnv() {
+  const requestId = String(process.env.WA_ONE_OFF_REQUEST_ID || '').trim();
+  const cnj = String(process.env.WA_ONE_OFF_CNJ || '').trim();
+  const rawPhone = String(process.env.WA_ONE_OFF_PHONE || '').trim();
+  if (!requestId || !cnj || !rawPhone) return;
+
+  const metaKey = 'oneOffReturn:' + requestId;
+  const prior = store.getMeta(metaKey);
+  if (prior) {
+    console.log(`ONE_OFF_RETURN already_processed request=${requestId} cnj=${cnj}`);
+    return;
+  }
+
+  const { phone, error } = normalizePhone(rawPhone, '55');
+  if (!phone || error) {
+    console.error(`ONE_OFF_RETURN failed request=${requestId} reason=${error || 'telefone inválido'}`);
+    return;
+  }
+
+  const deadline = Date.now() + 120000;
+  while (!transport.isReady() && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  if (!transport.isReady()) {
+    console.error(`ONE_OFF_RETURN failed request=${requestId} reason=WhatsApp não ficou pronto em 120s`);
+    return;
+  }
+
+  try {
+    const result = await legalMonitor.sendOneOffProcessReturn({ cnj, phone, requestId });
+    await snapshot.save(dataDir, store);
+    console.log(`ONE_OFF_RETURN ${result.status} request=${requestId} cnj=${cnj} source=${result.source || '-'} eventAt=${result.eventAt || '-'} title=${String(result.title || '').replace(/\s+/g,' ').slice(0,300)} messageId=${result.messageId || '-'}`);
+  } catch (error) {
+    await snapshot.save(dataDir, store).catch(()=>{});
+    console.error(`ONE_OFF_RETURN failed request=${requestId} cnj=${cnj} reason=${String(error?.message || error).replace(/\s+/g,' ').slice(0,500)}`);
+  }
+}
+
+
 const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, onMutation: persist });
 const port = Number(process.env.PORT || 10000);
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`\nWA.Auto Cloud está pronto na porta ${port}.\n`);
   setImmediate(() => void transport.connect().catch(error => console.error('Falha ao iniciar conexão do WhatsApp:', error.message)));
+  setTimeout(() => void runOneOffReturnFromEnv(), 1500).unref?.();
 });
 server.on('error', error => {
   console.error(error.code === 'EADDRINUSE' ? `A porta ${port} já está em uso.` : error.message);
