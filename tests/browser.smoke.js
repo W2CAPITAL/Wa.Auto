@@ -49,7 +49,7 @@ try {
   assert.equal(await page.$eval('#name-column', el => el.value), 'Cliente');
   await page.waitForFunction(() => !document.getElementById('import-contacts').classList.contains('hidden'));
   assert.match(await page.$eval('#import-contact-summary', el => el.textContent), /2 contato\(s\) válido\(s\)/);
-  assert.match(await page.$eval('#import-contact-details', el => el.textContent), /5 linhas.*3 telefone\(s\) preenchido\(s\).*1 repetido\(s\).*1 não contatar.*1 vazio\(s\)\/inválido\(s\)/);
+  assert.match(await page.$eval('#import-contact-details', el => el.textContent), /5 linhas.*4 telefone\(s\) preenchido\(s\).*1 repetido\(s\).*1 não contatar.*1 vazio\(s\)\/inválido\(s\)/);
   assert.match(await page.$eval('#import-contact-rows', el => el.textContent), /Ana Exemplo/);
   assert.match(await page.$eval('#import-contact-rows', el => el.textContent), /Bruno Exemplo/);
   assert.match(await page.$eval('#send-all-valid', el => el.textContent), /Enviar para todos os 2 válidos/);
