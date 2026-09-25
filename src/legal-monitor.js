@@ -182,13 +182,41 @@ export function formatProcessMessage(monitor, event) {
   ].join('');
 }
 
+export function formatProcessDigest(monitor, events) {
+  const ordered = [...events].sort((a,b) => String(a.event_at || a.eventAt).localeCompare(String(b.event_at || b.eventAt)));
+  if (ordered.length === 1) {
+    const event = ordered[0];
+    return formatProcessMessage(monitor, { ...event, eventAt:event.eventAt || event.event_at });
+  }
+  const lines = ordered.slice(-12).map(event => {
+    const rawDate = event.eventAt || event.event_at;
+    const date = new Date(rawDate);
+    const when = Number.isFinite(date.getTime())
+      ? date.toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', dateStyle:'short', timeStyle:'short' })
+      : rawDate;
+    return `• [${event.source}] ${when} — ${String(event.title || 'Movimentação processual').slice(0,420)}`;
+  });
+  const omitted = Math.max(0, ordered.length - lines.length);
+  return [
+    '📌 *ATUALIZAÇÃO PROCESSUAL*',
+    monitor.client_name ? `\nCliente: *${monitor.client_name}*` : '',
+    `\nProcesso: *${formatCnj(monitor.cnj)}*`,
+    `\nForam detectadas *${ordered.length} novas movimentações* desde o último aviso:\n`,
+    lines.join('\n'),
+    omitted ? `\n+ ${omitted} movimentação(ões) adicional(is) registrada(s) no histórico do WA.Auto.` : '',
+    '\n\nMensagem automática de acompanhamento. Responda SAIR se não quiser receber novos avisos.'
+  ].join('').slice(0,7600);
+}
+
 export class LegalMonitorService {
   constructor(store, transport, {
     fetchImpl = fetch,
     onMutation = () => {},
     scanIntervalMs = 30 * 60 * 1000,
     minTriggerIntervalMs = 20 * 60 * 1000,
-    sendDelayMs = 5000
+    sendDelayMs = 30000,
+    resourceGuard = null,
+    criticalIntent = null
   } = {}) {
     this.store = store;
     this.transport = transport;
@@ -197,6 +225,8 @@ export class LegalMonitorService {
     this.scanIntervalMs = scanIntervalMs;
     this.minTriggerIntervalMs = minTriggerIntervalMs;
     this.sendDelayMs = Math.max(0, Number(sendDelayMs) || 0);
+    this.resourceGuard = resourceGuard;
+    this.criticalIntent = criticalIntent;
     this.busy = false;
     this.timer = null;
   }
@@ -217,6 +247,9 @@ export class LegalMonitorService {
   }
 
   async trigger({ force = false } = {}) {
+    if (this.resourceGuard && !this.resourceGuard.canWork()) {
+      return { skipped:true, reason:'memory-pressure', ...this.snapshot() };
+    }
     const last = Number(this.store.getMeta('legalLastTriggeredAt') || 0);
     const now = Date.now();
     if (!force && last && now - last < this.minTriggerIntervalMs) {
@@ -247,6 +280,10 @@ export class LegalMonitorService {
       }
 
       for (const monitor of selected) {
+        if (this.resourceGuard && !this.resourceGuard.canWork()) {
+          result.stoppedForMemory = true;
+          break;
+        }
         const one = await this.scanOne(monitor);
         result.checked++;
         result.newEvents += one.newEvents;
@@ -321,28 +358,69 @@ export class LegalMonitorService {
   async sendPendingNotifications() {
     if (this.store.active()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length };
     if (!this.transport.isReady()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length };
+    if (this.resourceGuard && !this.resourceGuard.canWork()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length, skipped:true, reason:'memory-pressure' };
+
+    const pending = this.store.pendingLegalEvents(100);
+    const groups = new Map();
+    for (const event of pending) {
+      const key = event.monitor_id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(event);
+    }
+
     let sent = 0, failed = 0;
-    for (const event of this.store.pendingLegalEvents(25)) {
+    for (const events of groups.values()) {
+      if (this.store.active() || !this.transport.isReady()) break;
+      if (this.resourceGuard && !this.resourceGuard.canWork()) break;
+      const first = events[0];
+      let attempted = false;
+
       try {
-        if (this.store.isBlocked(event.phone, `${event.phone}@s.whatsapp.net`, `${event.phone}@c.us`)) {
-          this.store.markLegalEvent(event.id, { sendStatus:'blocked', error:'Contato está na lista de não contatar.' });
+        if (this.store.isBlocked(first.phone, `${first.phone}@s.whatsapp.net`, `${first.phone}@c.us`)) {
+          for (const event of events) this.store.markLegalEvent(event.id, { sendStatus:'blocked', error:'Contato está na lista de não contatar.' });
+          this.onMutation();
           continue;
         }
-        const jid = await this.transport.resolve(event.phone);
+
+        const jid = await this.transport.resolve(first.phone);
         if (!jid) {
-          this.store.markLegalEvent(event.id, { sendStatus:'failed', error:'Número não encontrado no WhatsApp.' });
-          failed++;
+          for (const event of events) this.store.markLegalEvent(event.id, { sendStatus:'failed', error:'Número não encontrado no WhatsApp.' });
+          failed += events.length;
+          this.onMutation();
           continue;
         }
-        const monitor = { cnj:event.cnj, client_name:event.client_name, phone:event.phone };
-        const result = await this.transport.send(jid, formatProcessMessage(monitor, event));
-        this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
+
+        if (this.criticalIntent) {
+          await this.criticalIntent.begin('legal', { monitorId:first.monitor_id, eventIds:events.map(event => event.id), phone:first.phone, jid });
+        }
+        for (const event of events) this.store.markLegalEvent(event.id, { sendStatus:'sending', error:'' });
+        attempted = true;
+        this.criticalIntent?.arm();
+        this.onMutation();
+
+        const monitor = { cnj:first.cnj, client_name:first.client_name, phone:first.phone };
+        const result = await this.transport.send(jid, formatProcessDigest(monitor, events));
+        for (const event of events) this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
         sent++;
         this.onMutation();
         if (this.sendDelayMs) await sleep(this.sendDelayMs);
       } catch (error) {
-        this.store.markLegalEvent(event.id, { sendStatus:'failed', error:String(error?.message || 'Falha no envio').slice(0,500) });
-        failed++;
+        const message = String(error?.message || 'Falha no envio').slice(0,500);
+        if (attempted) {
+          for (const event of events) this.store.markLegalEvent(event.id, {
+            sendStatus:'uncertain',
+            error:'Envio sem confirmação. O WA.Auto não reenviará automaticamente para evitar duplicidade.'
+          });
+        } else if (/envio anterior ainda em recuperação|proteger o envio|persistência remota/i.test(message)) {
+          // Keep the events waiting. A future scan can resume after the durable
+          // journal is reconciled, without losing or duplicating a notification.
+          break;
+        } else {
+          for (const event of events) this.store.markLegalEvent(event.id, { sendStatus:'failed', error:message });
+          failed += events.length;
+        }
+        this.onMutation();
+        if (attempted) break;
       }
     }
     return { sent, failed, waiting:this.store.pendingLegalEvents(100).length };
