@@ -56,7 +56,7 @@ try {
   assert.match(await page.$eval('#import-contact-rows', el => el.textContent), /Bruno Exemplo/);
   assert.match(await page.$eval('#send-all-valid', el => el.textContent), /Enviar para todos os 2 válidos/);
   await page.click('#contact-tab-valid');
-  assert.equal(await page.$eval('#import-contact-rows tr', rows => rows.length), 2);
+  assert.equal(await page.$$eval('#import-contact-rows tr', rows => rows.length), 2);
   await page.click('#contact-tab-all');
   await page.type('#global-search', 'Bruno');
   await page.waitForFunction(() => document.getElementById('import-contact-rows').textContent.includes('Bruno Exemplo'));
