@@ -168,7 +168,7 @@
           <div class="textarea-footer"><span>Use {{Cliente}} e outros campos para personalizar</span><span id="char-count">0 / 8.000</span></div>
 
           <div class="message-settings">
-            <label>Intervalo entre envios<div class="input-unit"><input id="interval" type="number" min="10" max="3600" value="30"><span>seg</span></div></label>
+            <label>Intervalo entre envios<div class="input-unit"><input id="interval" type="number" min="30" max="3600" value="30"><span>seg</span></div></label>
             <button class="button secondary compact" id="review" disabled>Revisar destinatários</button>
           </div>
 
@@ -185,7 +185,7 @@
           </div>
 
           <button class="send-all-button" id="send-all-valid" disabled><span>✈</span> Enviar para todos os contatos válidos <span>⌄</span></button>
-          <p class="send-note">◉ A campanha será enviada apenas para contatos válidos.</p>
+          <p class="send-note">◉ Envio sequencial com intervalo mínimo de 30 s, opt-out e pausa automática em falhas. Nenhum intervalo elimina o risco de restrição pelo WhatsApp.</p>
           <button class="button link-button" id="test-message" disabled>Enviar um teste para mim</button>
         </section>
       </div>
