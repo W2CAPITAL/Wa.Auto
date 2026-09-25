@@ -57,7 +57,7 @@ export class Queue extends EventEmitter {
     let attempted = false;
     try {
       this.store.updateEntry(entry.id, { status: 'resolving' });
-      if (this.store.isBlocked(entry.phone, `${entry.phone}@c.us`)) {
+      if (this.store.isBlocked(entry.phone, `${entry.phone}@s.whatsapp.net`, `${entry.phone}@c.us`)) {
         this.store.updateEntry(entry.id, { status: 'skipped', reason: 'Contato bloqueado' }); return;
       }
       const jid = await this.transport.resolve(entry.phone);
