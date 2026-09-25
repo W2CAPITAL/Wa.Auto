@@ -89,7 +89,7 @@ export function createCampaign(store, input) {
   const prepared = prepareCampaign(store, input);
   requireValue(prepared.counts.pending > 0, 'Nenhum destinatário válido selecionado. Confira a revisão.');
   const intervalSeconds = Number(input.intervalSeconds ?? 30);
-  requireValue(Number.isFinite(intervalSeconds) && intervalSeconds >= 10 && intervalSeconds <= 3600, 'Use um intervalo entre 10 e 3.600 segundos.');
+  requireValue(Number.isFinite(intervalSeconds) && intervalSeconds >= 30 && intervalSeconds <= 3600, 'Use um intervalo entre 30 e 3.600 segundos.');
   requireValue(typeof input.name === 'string' && input.name.trim().length > 0 && input.name.length <= 120, 'Dê um nome à campanha (até 120 caracteres).');
   const config = { filename: prepared.filename, sheet: prepared.sheet, template: input.template, phoneColumn: input.phoneColumn, nameColumn: input.nameColumn || '', intervalSeconds };
   return store.createCampaign(input.name.trim(), config, prepared.entries);
