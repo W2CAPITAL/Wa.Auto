@@ -12,7 +12,8 @@
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "test:browser": "node tests/browser.smoke.js",
     "check": "node scripts/check.js",
-    "verify": "npm run check && npm test"
+    "verify": "npm run check && npm test",
+    "test:hosted": "node tests/browser.hosted.js"
   },
   "dependencies": {
     "csv-parse": "7.0.2",
