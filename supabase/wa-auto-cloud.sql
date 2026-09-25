@@ -31,10 +31,13 @@ as $$
     from public.wa_auto_config c
     where c.id = 'default'
       and c.secret_hash = encode(
-        digest(
-          coalesce(
-            (coalesce(current_setting('request.headers', true), '{}')::jsonb ->> 'x-wa-secret'),
-            ''
+        extensions.digest(
+          convert_to(
+            coalesce(
+              (coalesce(current_setting('request.headers', true), '{}')::jsonb ->> 'x-wa-secret'),
+              ''
+            ),
+            'UTF8'
           ),
           'sha256'
         ),
