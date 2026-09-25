@@ -42,7 +42,7 @@ export class Queue extends EventEmitter {
     requireValue(!['completed', 'cancelled'].includes(campaign.status), 'Esta campanha já foi encerrada.', 409);
     this.store.transaction(() => {
       this.store.setCampaign(id, 'cancelled', 'Cancelada por você. Um envio já iniciado pode concluir.');
-      this.store.db.prepare("UPDATE recipients SET status='cancelled',reason='Campanha cancelada' WHERE campaign_id=? AND status IN ('pending','resolving')").run(id);
+      this.store.cancelPending(id);
     });
     this.emit('change');
   }
