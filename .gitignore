@@ -1,0 +1,12 @@
+node_modules/
+data/
+.wwebjs_auth/
+.wwebjs_cache/
+.env
+*.log
+coverage/
+test-results/
+*.xlsx
+*.xls
+*.sqlite*
+*.db*
