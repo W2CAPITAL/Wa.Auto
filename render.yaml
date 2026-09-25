@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: wa-auto-cloud
+    runtime: node
+    plan: free
+    buildCommand: npm install --no-fund
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: WA_HOSTED
+        value: "1"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: WA_DB_SECRET
+        sync: false
