@@ -575,14 +575,16 @@ $('legal-monitor-form').addEventListener('submit', event => {
       cnj:$('legal-cnj').value,
       clientName:$('legal-client').value,
       phone:$('legal-phone').value,
+      lastReturnAt:$('legal-last-return').value,
       mode:$('legal-mode').value,
       notifyWhatsapp:$('legal-notify').checked
     }});
     $('legal-cnj').value = '';
     $('legal-client').value = '';
     $('legal-phone').value = '';
+    $('legal-last-return').value = '';
     await loadLegal();
-    toast(result.scan?.newEvents ? 'Processo monitorado e novas movimentações registradas.' : 'Processo monitorado. A linha de base foi criada sem enviar histórico antigo.');
+    toast(result.scan?.newEvents ? 'Processo monitorado. Há movimentação posterior ao último retorno e ela entrou na fila.' : 'Processo monitorado. Nenhuma movimentação posterior ao último retorno foi encontrada.');
   });
 });
 onClick('legal-refresh', async () => {
