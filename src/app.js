@@ -10,7 +10,7 @@ import { AppError, requireValue } from './errors.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
-export function createApp({ store, transport, queue }) {
+export function createApp({ store, transport, queue, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
@@ -46,6 +46,12 @@ export function createApp({ store, transport, queue }) {
     next();
   });
   app.use(express.json({ limit: '2mb' }));
+  app.use((req, res, next) => {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.path.startsWith('/api/')) {
+      res.on('finish', () => { if (res.statusCode < 500) onMutation(); });
+    }
+    next();
+  });
   app.get('/api/health', (req, res) => res.json({ ok: true, service: 'WA.Auto', pid: process.pid, uptime: Math.floor(process.uptime()) }));
   app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0) }));
   app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy }));
