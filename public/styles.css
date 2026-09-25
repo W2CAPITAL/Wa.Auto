@@ -330,7 +330,7 @@ dialog::backdrop{background:rgba(20,36,30,.38);backdrop-filter:blur(5px)}
 .legal-source-error{margin-top:8px;background:#fff3e8;border:1px solid #f0ddc9;color:#9a6b36;border-radius:8px;padding:7px 9px;font-size:9px}
 .legal-monitor-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .legal-import-card{margin-top:18px}
-.legal-import-controls{display:grid;grid-template-columns:1fr 1fr 1fr 1fr .8fr auto;gap:10px;align-items:end}
+.legal-import-controls{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) .8fr auto;gap:10px;align-items:end}
 .legal-import-controls label{font-size:10px}
 .legal-event-row .history-icon{font-weight:900}
 .legal-event-row .history-info p{font-size:9px;color:#6c7a73;line-height:1.45;margin:5px 0 0;max-width:850px}
