@@ -226,19 +226,20 @@
         <section class="panel legal-add-card">
           <div class="panel-heading">
             <div class="heading-icon legal-icon">⚖</div>
-            <div><h2>Adicionar processo</h2><p>O primeiro scan cria uma linha de base e não envia movimentações antigas.</p></div>
+            <div><h2>Adicionar processo</h2><p>Se houver último retorno, o WA.Auto avisa somente movimentações posteriores a ele.</p></div>
           </div>
           <form id="legal-monitor-form" class="legal-form">
             <label>Número do processo (CNJ)<input id="legal-cnj" placeholder="0000000-00.2026.8.26.0000" required></label>
             <label>Cliente<input id="legal-client" placeholder="Nome do cliente" maxlength="160" required></label>
             <label>WhatsApp do cliente<input id="legal-phone" placeholder="(11) 99999-9999" inputmode="tel" required></label>
+            <label>Último retorno ao cliente<input id="legal-last-return" type="date"></label>
             <label>Fontes<select id="legal-mode"><option value="both">DataJud + DJEN</option><option value="datajud">Somente DataJud</option><option value="djen">Somente DJEN</option></select></label>
             <label class="checkbox-label legal-checkbox"><input id="legal-notify" type="checkbox" checked>Enviar novas movimentações automaticamente por WhatsApp</label>
             <button class="button primary full" id="legal-add" type="submit">＋ Monitorar processo</button>
           </form>
           <div class="legal-source-note">
             <strong>Como funciona</strong>
-            <p>DataJud consulta metadados e movimentações públicas. DJEN consulta publicações oficiais. Resultado vazio não é tratado como prova de inexistência do processo.</p>
+            <p><strong>Regra de envio:</strong> uma movimentação só entra no WhatsApp quando a data dela é posterior ao último retorno registrado para o cliente. DataJud e DJEN continuam sendo fontes independentes; falha de uma não apaga o último dado válido.</p>
           </div>
         </section>
 
@@ -255,18 +256,27 @@
 
       <section class="panel legal-import-card">
         <div class="section-heading">
-          <div><h2>Importar processos da planilha já carregada</h2><p>Use a mesma planilha de clientes. Escolha a coluna do número CNJ, telefone e nome.</p></div>
+          <div><h2>A mesma planilha também alimenta as atualizações processuais</h2><p>Não precisa criar outro arquivo. O WA.Auto usa Cliente, Telefone, Protocolo, Retorno, Data_Movimentacao e Andamento da planilha já importada.</p></div>
           <span class="subtle-tag" id="legal-import-file">Nenhuma planilha ativa</span>
+        </div>
+        <div class="legal-rule-banner">
+          <span>✓</span>
+          <div><strong>Movimentação posterior ao último retorno = aviso automático</strong><p>Se Data_Movimentacao/DJEN for depois de Retorno, entra na fila do WhatsApp. Se for anterior ou igual, fica somente no histórico como já coberta.</p></div>
         </div>
         <div id="legal-import-controls" class="legal-import-controls">
           <label>Aba<select id="legal-import-sheet"></select></label>
           <label>Processo<select id="legal-process-column"></select></label>
           <label>Telefone<select id="legal-phone-column"></select></label>
           <label>Cliente<select id="legal-name-column"></select></label>
+          <label>Último retorno<select id="legal-last-return-column"></select></label>
+          <label>Próximo retorno<select id="legal-next-return-column"></select></label>
+          <label>Data da movimentação<select id="legal-movement-date-column"></select></label>
+          <label>Andamento<select id="legal-movement-text-column"></select></label>
           <label>Autorização<select id="legal-consent-column"></select></label>
           <label>Fontes<select id="legal-import-mode"><option value="both">DataJud + DJEN</option><option value="datajud">DataJud</option><option value="djen">DJEN</option></select></label>
-          <button class="button primary" id="legal-import-button" disabled>Importar processos válidos</button>
+          <button class="button primary" id="legal-import-button" disabled>Ativar atualizações desta planilha</button>
         </div>
+        <p class="legal-import-result" id="legal-import-result">As colunas serão reconhecidas automaticamente no modelo Processos: F = Protocolo, M = Retorno, N = Proximo_Retorno.</p>
       </section>
 
       <section class="history-section">
