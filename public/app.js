@@ -89,10 +89,6 @@ function setImport(imported, draft = {}) {
   $('upload-subtitle').textContent = `${imported.sheets.length} aba(s) · clique para trocar o arquivo`;
   const first = imported.sheets.find(sheet => sheet.suggestedPhone && sheet.rowCount) || imported.sheets[0];
   options($('sheet'), imported.sheets.map(sheet => sheet.name), draft.sheet || first.name, null);
-  if (!$('campaign-name').value.trim()) {
-    const base = imported.filename.replace(/\.(xlsx|csv)$/i, '').replace(/[_-]+/g, ' ').trim();
-    $('campaign-name').value = (`Envio — ${base}`).slice(0, 120);
-  }
   configureSheet(draft);
 }
 async function loadFilterValues(selected = '') {
@@ -193,6 +189,11 @@ async function prepareAllRecipients() {
 }
 onClick('review', prepareAllRecipients);
 onClick('send-all-valid', async () => {
+  if (!$('campaign-name').value.trim()) {
+    const base = (state.imported?.filename || 'carteira').replace(/\.(xlsx|csv)$/i, '').replace(/[_-]+/g, ' ').trim();
+    $('campaign-name').value = (`Envio — ${base}`).slice(0, 120);
+    saveDraft();
+  }
   if (!$('template').value.trim()) {
     $('template').focus();
     $('template').scrollIntoView({ behavior: 'smooth', block: 'center' });
