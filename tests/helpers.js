@@ -16,6 +16,6 @@ export class TestTransport extends EventEmitter {
 export function fixture(filename = ':memory:', grid = [['Cliente','Telefone','Autorizado','Observacoes'], ['Ana','11999990001','sim',''], ['Bia','21999990002','sim','']]) {
   const store = new Store(filename);
   const id = store.saveImport({ filename: 'teste.csv', sheets: [gridToSheet('Clientes', grid)] });
-  const input = { importId: id, sheet: 'Clientes', phoneColumn: 'Telefone', nameColumn: 'Cliente', template: 'Olá, {{Cliente}}!', country: '55', name: 'Campanha de teste', intervalSeconds: 10 };
+  const input = { importId: id, sheet: 'Clientes', phoneColumn: 'Telefone', nameColumn: 'Cliente', template: 'Olá, {{Cliente}}!', country: '55', name: 'Campanha de teste', intervalSeconds: 30 };
   return { store, input, create: (extra = {}) => createCampaign(store, { ...input, ...extra }) };
 }
