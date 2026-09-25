@@ -22,6 +22,7 @@ export class Store {
     this.db.prepare("UPDATE recipients SET status='uncertain',reason='O aplicativo fechou durante o envio. Confira a conversa; não haverá reenvio automático.' WHERE status='sending'").run();
     this.db.prepare("UPDATE recipients SET status='pending' WHERE status='resolving'").run();
   }
+  checkpoint() { try { this.db.exec('PRAGMA wal_checkpoint(FULL)'); } catch {} }
   close() { this.db.close(); }
   transaction(fn) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -78,6 +79,7 @@ export class Store {
   }
   suppressions() { return this.db.prepare('SELECT * FROM suppressions ORDER BY created_at DESC').all(); }
   removeSuppression(identity) { this.db.prepare('DELETE FROM suppressions WHERE identity=?').run(identity); }
+  cancelPending(campaignId) { this.db.prepare("UPDATE recipients SET status='cancelled',reason='Campanha cancelada',updated_at=? WHERE campaign_id=? AND status IN ('pending','resolving')").run(iso(), campaignId); }
   recordAck(messageId, ack) {
     const row = this.db.prepare('SELECT * FROM recipients WHERE message_id=?').get(messageId);
     if (!row || !Number.isInteger(ack) || !['sent', 'delivered', 'read', 'failed_delivery'].includes(row.status)) return;
