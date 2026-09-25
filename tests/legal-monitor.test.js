@@ -136,3 +136,34 @@ test('planilha só coloca na fila movimentação posterior ao último retorno do
   service.stop();
   store.close();
 });
+
+
+test('retorno avulso usa somente a movimentação pública mais recente e não duplica', async () => {
+  const store=new Store(':memory:');
+  const transport=new TestTransport();
+  const fetchImpl=makeFetch();
+  fetchImpl.next();
+  const service=new LegalMonitorService(store,transport,{fetchImpl,onMutation:()=>{},scanIntervalMs:999999,minTriggerIntervalMs:0,sendDelayMs:0});
+
+  const first=await service.sendOneOffProcessReturn({
+    cnj,
+    phone:'5511999990001',
+    requestId:'teste-retorno-avulso'
+  });
+  assert.equal(first.status,'sent');
+  assert.equal(transport.sent.length,1);
+  assert.match(transport.sent[0].message,/RETORNO PROCESSUAL/);
+  assert.match(transport.sent[0].message,/Intimação/);
+  assert.ok(store.getMeta('oneOffReturn:teste-retorno-avulso'));
+
+  const second=await service.sendOneOffProcessReturn({
+    cnj,
+    phone:'5511999990001',
+    requestId:'teste-retorno-avulso'
+  });
+  assert.equal(second.alreadyProcessed,true);
+  assert.equal(transport.sent.length,1);
+
+  service.stop();
+  store.close();
+});
