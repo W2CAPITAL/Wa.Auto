@@ -40,6 +40,26 @@
               <div class="fields-grid three"><label>Aba da planilha<select id="sheet"></select></label><label>Coluna de telefone <span class="required">*</span><select id="phone-column"></select></label><label>Coluna de nome<select id="name-column"></select></label></div>
               <details class="advanced"><summary>Filtros e opções de importação <span>＋</span></summary><div class="fields-grid two"><label>Filtrar por coluna<select id="filter-column"></select></label><label>Valor do filtro<select id="filter-value" disabled></select></label><label>Autorização na planilha (opcional)<select id="consent-column"></select></label><label>Código do país<input id="country" inputmode="numeric" value="55" maxlength="3"></label></div><p class="field-hint">Com uma coluna de autorização, apenas valores como “sim”, “1” ou “autorizado” entram. Números internacionais devem incluir + e o país.</p></details>
             </div>
+            <div id="import-contacts" class="contact-preview hidden">
+              <div class="contact-preview-heading">
+                <div>
+                  <span class="eyebrow">CARTEIRA CARREGADA</span>
+                  <strong id="import-contact-summary">Nenhum contato carregado</strong>
+                  <small id="import-contact-details" class="muted"></small>
+                </div>
+                <button class="button primary" id="send-all-valid" disabled>Enviar para todos os válidos →</button>
+              </div>
+              <div class="table-scroll compact-table">
+                <table>
+                  <thead><tr><th>Linha</th><th>Cliente</th><th>Telefone</th><th>Situação</th></tr></thead>
+                  <tbody id="import-contact-rows"></tbody>
+                </table>
+              </div>
+              <div class="pagination">
+                <span id="import-contact-page-label"></span>
+                <div><button id="import-contact-prev" class="button small secondary">← Anterior</button><button id="import-contact-next" class="button small secondary">Próxima →</button></div>
+              </div>
+            </div>
           </section>
           <section class="card compose-card">
             <div class="card-heading"><div class="step-number">02</div><div><h2>Dê um toque pessoal</h2><p>Escreva uma vez. Personalize para cada cliente.</p></div></div>
