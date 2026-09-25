@@ -17,3 +17,11 @@
   .contact-preview-heading{align-items:stretch;flex-direction:column}
   .contact-preview-heading .button{width:100%}
 }
+
+.editor-column,.import-card,.contact-preview,.table-scroll{min-width:0;max-width:100%}
+.contact-preview .table-scroll{width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.contact-preview table{width:max-content;min-width:720px;max-width:none}
+@media(max-width:760px){
+  .contact-preview{overflow:hidden}
+  .contact-preview .table-scroll{max-width:100%}
+}
