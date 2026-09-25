@@ -160,7 +160,7 @@ export async function fetchDjenProcess(cnj, { fetchImpl = fetch, days = 365 } = 
   if (!digits) return { ok:false, source:'DJEN', error:'Número CNJ inválido.', events:[] };
 
   const endDate = new Date();
-  const startDate = new Date(Date.now() - Math.max(1, Math.min(Number(days) || 365, 365)) * 86400000);
+  const startDate = new Date(Date.now() - Math.max(1, Math.min(Number(days) || 365, 1825)) * 86400000);
   const end = endDate.toISOString().slice(0,10);
   const start = startDate.toISOString().slice(0,10);
   const masked = formatCnj(digits);
@@ -589,7 +589,7 @@ export class LegalMonitorService {
     return { newEvents, sent:sentResult.sent, failed:sentResult.failed, sources };
   }
 
-  async sendOneOffProcessReturn({ cnj, phone, requestId }) {
+  async sendOneOffProcessReturn({ cnj, phone, requestId, preferredSource = '' }) {
     const digits = normalizeCnj(cnj);
     if (!digits) throw new Error('Número CNJ inválido para o retorno.');
     if (!phone) throw new Error('Telefone não informado para o retorno.');
@@ -605,17 +605,26 @@ export class LegalMonitorService {
       notifyWhatsapp:true
     });
 
+    const sourcePreference = String(preferredSource || '').trim().toLowerCase();
     const [datajud, djen] = await Promise.all([
-      fetchDataJudProcess(digits, { fetchImpl:this.fetchImpl }),
-      fetchDjenProcess(digits, { fetchImpl:this.fetchImpl })
+      sourcePreference === 'djen'
+        ? Promise.resolve({ ok:false, source:'DataJud', skipped:true, events:[] })
+        : fetchDataJudProcess(digits, { fetchImpl:this.fetchImpl }),
+      fetchDjenProcess(digits, { fetchImpl:this.fetchImpl, days:1825 })
     ]);
-    const candidates = [...(datajud.ok ? datajud.events : []), ...(djen.ok ? djen.events : [])]
-      .filter(event => event?.eventAt && event.eventAt > '1971-01-01T00:00:00.000Z')
+    const allCandidates = [...(datajud.ok ? datajud.events : []), ...(djen.ok ? djen.events : [])]
+      .filter(event => event?.eventAt && event.eventAt > '1971-01-01T00:00:00.000Z');
+    const candidates = (sourcePreference === 'djen'
+      ? allCandidates.filter(event => event.source === 'DJEN')
+      : sourcePreference === 'datajud'
+        ? allCandidates.filter(event => event.source === 'DataJud')
+        : allCandidates)
       .sort((a,b) => b.eventAt.localeCompare(a.eventAt));
     const latest = candidates[0];
     if (!latest) {
       const reasons = [datajud.error, djen.error].filter(Boolean).join(' · ');
-      throw new Error(reasons || 'Nenhuma movimentação pública foi localizada para o processo.');
+      const qualifier = sourcePreference ? ` na fonte ${sourcePreference.toUpperCase()}` : '';
+      throw new Error(reasons || `Nenhuma movimentação pública foi localizada${qualifier} para o processo.`);
     }
 
     const eventHash = sha(`OneOff|${requestId}|${latest.hash}`);
