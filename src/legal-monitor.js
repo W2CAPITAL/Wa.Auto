@@ -58,6 +58,44 @@ function eventTime(value) {
   const date = new Date(value || 0);
   return Number.isFinite(date.getTime()) ? date.toISOString() : new Date(0).toISOString();
 }
+
+export function parseClientDate(value, { endOfDay = false } = {}) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    const date = new Date(value.getTime());
+    if (endOfDay) date.setUTCHours(23, 59, 59, 999);
+    return date.toISOString();
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // Excel serial date persisted as text.
+  if (/^\d{5}(?:\.\d+)?$/.test(raw)) {
+    const serial = Number(raw);
+    if (serial > 20000 && serial < 90000) {
+      const date = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+      if (endOfDay) date.setUTCHours(23, 59, 59, 999);
+      return date.toISOString();
+    }
+  }
+
+  const br = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (br) {
+    const [, dd, mm, yyyy, hh, mi, ss] = br;
+    const hasTime = hh != null;
+    const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), hasTime ? Number(hh) : (endOfDay ? 23 : 0), hasTime ? Number(mi) : (endOfDay ? 59 : 0), hasTime ? Number(ss || 0) : (endOfDay ? 59 : 0), endOfDay && !hasTime ? 999 : 0));
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(raw)) parsed.setUTCHours(23, 59, 59, 999);
+  return parsed.toISOString();
+}
+
+function latestBoundary(...values) {
+  return values.filter(Boolean).sort().at(-1) || null;
+}
 function summarizeMovement(movement) {
   const title = String(movement?.nome || movement?.descricao || movement?.complemento || 'Movimentação processual').trim();
   const details = String(movement?.complemento || movement?.descricao || '').trim();
@@ -229,6 +267,7 @@ export class LegalMonitorService {
     this.criticalIntent = criticalIntent;
     this.busy = false;
     this.timer = null;
+    this.sendTimer = null;
   }
 
   snapshot() {
@@ -237,13 +276,19 @@ export class LegalMonitorService {
 
   start() {
     clearInterval(this.timer);
+    clearInterval(this.sendTimer);
     this.timer = setInterval(() => void this.trigger({ force:true }).catch(error => console.error('Monitor jurídico:', error.message)), this.scanIntervalMs);
     this.timer.unref?.();
+    const drainEvery = Math.max(5000, this.sendDelayMs || 5000);
+    this.sendTimer = setInterval(() => void this.sendPendingNotifications({ maxGroups:1 }).catch(error => console.error('Fila jurídica:', error.message)), drainEvery);
+    this.sendTimer.unref?.();
   }
 
   stop() {
     clearInterval(this.timer);
+    clearInterval(this.sendTimer);
     this.timer = null;
+    this.sendTimer = null;
   }
 
   async trigger({ force = false } = {}) {
@@ -300,6 +345,76 @@ export class LegalMonitorService {
     }
   }
 
+  syncSpreadsheetSnapshot(monitorOrId, snapshot = {}) {
+    let monitor = typeof monitorOrId === 'string' ? this.store.legalMonitor(monitorOrId) : monitorOrId;
+    const lastReturnAt = parseClientDate(snapshot.lastReturnAt, { endOfDay:true });
+    const nextReturnAt = parseClientDate(snapshot.nextReturnAt, { endOfDay:true });
+    const sheetMovementAt = parseClientDate(snapshot.movementAt);
+    const djenAt = parseClientDate(snapshot.djenAt);
+    const lastNotifiedAt = parseClientDate(snapshot.lastNotifiedAt);
+
+    this.store.updateLegalMonitor(monitor.id, {
+      ...(nextReturnAt ? { next_return_at:nextReturnAt } : {}),
+      ...(sheetMovementAt ? { sheet_movement_at:sheetMovementAt } : {}),
+      ...(snapshot.movementText ? { sheet_movement_text:String(snapshot.movementText).slice(0,4000) } : {}),
+      ...(lastNotifiedAt ? { last_notified_at:lastNotifiedAt } : {}),
+      ...(snapshot.sourceImportId ? { source_import_id:snapshot.sourceImportId } : {}),
+      ...(snapshot.sourceSheet ? { source_sheet:snapshot.sourceSheet } : {}),
+      ...(snapshot.sourceRow != null ? { source_row:Number(snapshot.sourceRow) } : {})
+    });
+    if (lastReturnAt) this.store.setLegalReturn({ phone:monitor.phone, cnj:monitor.cnj, at:lastReturnAt, source:'planilha importada' });
+    monitor = this.store.legalMonitor(monitor.id);
+
+    const candidates = [];
+    if (sheetMovementAt && snapshot.movementText) {
+      const title = String(snapshot.movementText).trim().slice(0,500) || 'Movimentação processual';
+      candidates.push({
+        source:'Planilha/DataJud',
+        eventAt:sheetMovementAt,
+        title,
+        details:String(snapshot.movementDetails || '').trim().slice(0,4000),
+        hash:sha(`Planilha/DataJud|${monitor.cnj}|${sheetMovementAt}|${title}`)
+      });
+    }
+    if (djenAt && snapshot.djenText) {
+      const title = String(snapshot.djenText).trim().slice(0,500) || 'Publicação DJEN';
+      candidates.push({
+        source:'Planilha/DJEN',
+        eventAt:djenAt,
+        title,
+        details:'',
+        hash:sha(`Planilha/DJEN|${monitor.cnj}|${djenAt}|${title}`)
+      });
+    }
+
+    let queued = 0, baseline = 0, covered = 0;
+    const boundary = latestBoundary(monitor.last_return_at, monitor.last_notified_at);
+    for (const event of candidates.sort((a,b) => a.eventAt.localeCompare(b.eventAt))) {
+      if (this.store.hasLegalEvent(monitor.id, event.hash) || this.store.hasEquivalentLegalEvent(monitor.id, event.eventAt, event.title)) continue;
+      let sendStatus = 'baseline';
+      if (boundary) sendStatus = event.eventAt > boundary ? 'waiting' : 'covered_by_return';
+      const saved = this.store.recordLegalEvent({
+        monitorId:monitor.id, eventHash:event.hash, source:event.source, title:event.title,
+        details:event.details, eventAt:event.eventAt, sendStatus
+      });
+      if (saved?.send_status === 'waiting') queued++;
+      else if (saved?.send_status === 'covered_by_return') covered++;
+      else baseline++;
+    }
+
+    const latest = candidates.sort((a,b) => b.eventAt.localeCompare(a.eventAt))[0];
+    if (latest && (!monitor.last_event_at || latest.eventAt > monitor.last_event_at)) {
+      this.store.updateLegalMonitor(monitor.id, {
+        last_event_at:latest.eventAt,
+        last_event_hash:latest.hash,
+        last_event_source:latest.source,
+        last_event_text:latest.title
+      });
+    }
+    this.onMutation();
+    return { queued, baseline, covered, boundary:lastReturnAt || monitor.last_return_at || null };
+  }
+
   async scanOne(monitorOrId, { seedOnly = false } = {}) {
     const monitor = typeof monitorOrId === 'string' ? this.store.legalMonitor(monitorOrId) : monitorOrId;
     const sources = {};
@@ -323,25 +438,28 @@ export class LegalMonitorService {
       .sort((a,b) => a.eventAt.localeCompare(b.eventAt))
       .slice(-120);
     const baseline = !monitor.last_event_at;
+    const boundary = latestBoundary(monitor.last_return_at, monitor.last_notified_at);
     let newEvents = 0;
     for (const event of sorted) {
-      if (this.store.hasLegalEvent(monitor.id, event.hash)) continue;
-      if (baseline || seedOnly) {
-        this.store.recordLegalEvent({ monitorId:monitor.id, eventHash:event.hash, source:event.source, title:event.title, details:event.details || '', eventAt:event.eventAt, sendStatus:'baseline' });
-        continue;
+      if (this.store.hasLegalEvent(monitor.id, event.hash) || this.store.hasEquivalentLegalEvent(monitor.id, event.eventAt, event.title)) continue;
+      let sendStatus;
+      if (boundary) {
+        sendStatus = event.eventAt > boundary ? 'waiting' : 'covered_by_return';
+      } else if (baseline || seedOnly) {
+        sendStatus = 'baseline';
+      } else {
+        sendStatus = 'waiting';
       }
-      // Depois da linha de base, a identidade do evento (hash) é a fonte de verdade.
-      // Isso também captura movimentações que o tribunal publica com atraso e cuja
-      // data oficial pode ser anterior ao último check.
-      this.store.recordLegalEvent({ monitorId:monitor.id, eventHash:event.hash, source:event.source, title:event.title, details:event.details || '', eventAt:event.eventAt, sendStatus:'waiting' });
-      newEvents++;
+      this.store.recordLegalEvent({ monitorId:monitor.id, eventHash:event.hash, source:event.source, title:event.title, details:event.details || '', eventAt:event.eventAt, sendStatus });
+      if (sendStatus === 'waiting') newEvents++;
     }
 
     const latest = fetched.sort((a,b) => b.eventAt.localeCompare(a.eventAt))[0];
+    const shouldAdvanceLatest = latest && (!monitor.last_event_at || latest.eventAt > monitor.last_event_at);
     this.store.updateLegalMonitor(monitor.id, {
       tribunal_alias: monitor.tribunal_alias || resolveDataJudAlias(monitor.cnj),
       last_checked_at:new Date().toISOString(),
-      ...(latest ? {
+      ...(shouldAdvanceLatest ? {
         last_event_at: latest.eventAt,
         last_event_hash: latest.hash,
         last_event_source: latest.source,
@@ -351,11 +469,11 @@ export class LegalMonitorService {
     });
     this.onMutation();
 
-    const sentResult = await this.sendPendingNotifications();
+    const sentResult = await this.sendPendingNotifications({ maxGroups:1 });
     return { newEvents, sent:sentResult.sent, failed:sentResult.failed, sources };
   }
 
-  async sendPendingNotifications() {
+  async sendPendingNotifications({ maxGroups = 25 } = {}) {
     if (this.store.active()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length };
     if (!this.transport.isReady()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length };
     if (this.resourceGuard && !this.resourceGuard.canWork()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length, skipped:true, reason:'memory-pressure' };
@@ -368,8 +486,9 @@ export class LegalMonitorService {
       groups.get(key).push(event);
     }
 
-    let sent = 0, failed = 0;
+    let sent = 0, failed = 0, processedGroups = 0;
     for (const events of groups.values()) {
+      if (processedGroups >= Math.max(1, Number(maxGroups) || 1)) break;
       if (this.store.active() || !this.transport.isReady()) break;
       if (this.resourceGuard && !this.resourceGuard.canWork()) break;
       const first = events[0];
@@ -401,9 +520,11 @@ export class LegalMonitorService {
         const monitor = { cnj:first.cnj, client_name:first.client_name, phone:first.phone };
         const result = await this.transport.send(jid, formatProcessDigest(monitor, events));
         for (const event of events) this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
+        this.store.markLegalNotified(first.monitor_id, events, new Date().toISOString());
         sent++;
+        processedGroups++;
         this.onMutation();
-        if (this.sendDelayMs) await sleep(this.sendDelayMs);
+        if (this.sendDelayMs && processedGroups < Math.max(1, Number(maxGroups) || 1)) await sleep(this.sendDelayMs);
       } catch (error) {
         const message = String(error?.message || 'Falha no envio').slice(0,500);
         if (attempted) {
