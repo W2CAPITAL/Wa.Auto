@@ -4,7 +4,7 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': 
 const labels = { draft: 'Rascunho', running: 'Em andamento', paused: 'Pausada', completed: 'Concluída', cancelled: 'Cancelada', valid: 'Válido', pending: 'Pronta para enviar', resolving: 'Conferindo número', sending: 'Enviando', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', uncertain: 'Conferir no WhatsApp', invalid: 'Revisar dados', duplicate: 'Repetido', skipped: 'Não contatar', excluded: 'Não selecionado', failed_delivery: 'Falha de entrega' };
 const badge = status => `<span class="badge ${escape(status)}">${escape(labels[status] || status)}</span>`;
 const number = value => Number(value || 0).toLocaleString('pt-BR');
-const state = { token: '', imported: null, contacts: null, contactPage: 0, contactFilter: 'all', contactSelection: new Set(), contactLoadSeq: 0, searchQuery: '', connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
+const state = { token: '', imported: null, contacts: null, contactPage: 0, contactFilter: 'all', contactSelection: new Set(), contactLoadSeq: 0, searchQuery: '', connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], legal: { monitored: 0, alerts: 0, sent: 0, lastScan: null, busy: false }, legalData: { monitors: [], events: [] }, preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
 const PAGE_SIZE = 25;
 let toastTimer;
 
@@ -90,7 +90,22 @@ function setImport(imported, draft = {}) {
   const first = imported.sheets.find(sheet => sheet.suggestedPhone && sheet.rowCount) || imported.sheets[0];
   options($('sheet'), imported.sheets.map(sheet => sheet.name), draft.sheet || first.name, null);
   configureSheet(draft);
+  configureLegalImport();
 }
+function configureLegalImport() {
+  if (!state.imported || !$('legal-import-sheet')) return;
+  $('legal-import-file').textContent = state.imported.filename;
+  const sheets = state.imported.sheets.filter(sheet => sheet.rowCount);
+  options($('legal-import-sheet'), sheets.map(sheet => sheet.name), $('sheet')?.value || sheets[0]?.name || '', null);
+  const sheet = state.imported.sheets.find(item => item.name === $('legal-import-sheet').value) || sheets[0];
+  if (!sheet) return;
+  const guess = patterns => sheet.headers.find(header => patterns.some(pattern => pattern.test(header))) || '';
+  options($('legal-process-column'), sheet.headers, guess([/process/i,/cnj/i,/n[uú]mero.*process/i]), 'Selecione');
+  options($('legal-phone-column'), sheet.headers, guess([/telefone/i,/celular/i,/whats/i,/fone/i]), 'Selecione');
+  options($('legal-name-column'), sheet.headers, guess([/cliente/i,/nome/i,/parte/i]), 'Não usar');
+  $('legal-import-button').disabled = !$('legal-process-column').value || !$('legal-phone-column').value;
+}
+
 async function loadFilterValues(selected = '') {
   if (!$('filter-column').value) { options($('filter-value'), [], '', 'Todas as linhas'); $('filter-value').disabled = true; invalidate(); return; }
   const column = $('filter-column').value;
@@ -465,6 +480,117 @@ onClick('send-test', async () => {
   toast('Teste colocado na fila. Acompanhe a confirmação.');
 });
 
+function legalDate(value, compact = false) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '—';
+  return compact ? date.toLocaleDateString('pt-BR') : date.toLocaleString('pt-BR');
+}
+function legalStatusLabel(event) {
+  return ({ waiting:'Aguardando WhatsApp', sent:'Enviado', failed:'Falhou', blocked:'Não contatar', baseline:'Linha de base' })[event.send_status] || event.send_status;
+}
+function renderLegal() {
+  if (!$('legal-stat-monitored')) return;
+  const stats = state.legal || {};
+  $('legal-stat-monitored').textContent = number(stats.monitored || 0);
+  $('legal-stat-alerts').textContent = number(stats.alerts || 0);
+  $('legal-stat-sent').textContent = number(stats.sent || 0);
+  $('legal-stat-last').textContent = stats.lastScan ? legalDate(stats.lastScan, true) : '—';
+  $('legal-last-scan').textContent = stats.busy ? 'Verificando agora…' : stats.lastScan ? `Última: ${legalDate(stats.lastScan)}` : 'Ainda não verificado';
+  $('legal-alert-count').textContent = stats.alerts ? number(stats.alerts) : '';
+
+  const monitors = state.legalData.monitors || [];
+  $('legal-monitor-list').innerHTML = monitors.length ? monitors.map(monitor => `
+    <article class="legal-monitor-row">
+      <div class="legal-monitor-main">
+        <div class="legal-monitor-title"><strong>${escape(monitor.client_name)}</strong><span class="subtle-tag">${escape(monitor.mode === 'both' ? 'DataJud + DJEN' : monitor.mode === 'datajud' ? 'DataJud' : 'DJEN')}</span></div>
+        <div class="legal-cnj">${escape(monitor.cnj.replace(/(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})/, '$1-$2.$3.$4.$5.$6'))}</div>
+        <small>+${escape(monitor.phone)} · ${monitor.enabled ? 'monitoramento ativo' : 'pausado'} · último check: ${escape(legalDate(monitor.last_checked_at))}</small>
+        ${monitor.last_event_text ? `<p><b>${escape(monitor.last_event_source || '')}</b> · ${escape(monitor.last_event_text)}</p>` : ''}
+        ${monitor.error ? `<div class="legal-source-error">${escape(monitor.error)}</div>` : ''}
+      </div>
+      <div class="legal-monitor-actions">
+        <button class="button small secondary" data-legal-scan="${monitor.id}">↻ Consultar</button>
+        <button class="button small secondary" data-legal-toggle="${monitor.id}" data-enabled="${monitor.enabled ? '1' : '0'}">${monitor.enabled ? 'Pausar' : 'Ativar'}</button>
+        <button class="button small danger" data-legal-delete="${monitor.id}">Remover</button>
+      </div>
+    </article>`).join('') : '<div class="empty-history">Nenhum processo monitorado ainda.</div>';
+
+  const events = state.legalData.events || [];
+  $('legal-event-list').innerHTML = events.length ? events.slice(0,100).map(event => `
+    <div class="history-row legal-event-row">
+      <span class="history-icon">${event.source === 'DJEN' ? 'D' : 'J'}</span>
+      <div class="history-info"><strong>${escape(event.title)}</strong><small>${escape(event.source)} · ${escape(legalDate(event.event_at))}</small>${event.details ? `<p>${escape(event.details.slice(0,420))}</p>` : ''}</div>
+      <span class="badge ${escape(event.send_status)}">${escape(legalStatusLabel(event))}</span>
+    </div>`).join('') : '<div class="empty-history">As novas movimentações aparecerão aqui depois da linha de base inicial.</div>';
+
+  const errors = monitors.filter(item => item.error).length;
+  $('legal-source-health').textContent = errors ? `${errors} monitor(es) com fonte parcial` : monitors.length ? 'Fontes sem erro no último check' : 'Fontes aguardando';
+
+  for (const button of $('legal-monitor-list').querySelectorAll('[data-legal-scan]')) button.addEventListener('click', () => void perform(button, async () => {
+    await api(`/api/legal/monitors/${button.dataset.legalScan}/scan`, { method:'POST', body:{} });
+    await loadLegal();
+    toast('Consulta processual concluída.');
+  }));
+  for (const button of $('legal-monitor-list').querySelectorAll('[data-legal-toggle]')) button.addEventListener('click', () => void perform(button, async () => {
+    await api(`/api/legal/monitors/${button.dataset.legalToggle}/toggle`, { method:'POST', body:{ enabled:button.dataset.enabled !== '1' } });
+    await loadLegal();
+  }));
+  for (const button of $('legal-monitor-list').querySelectorAll('[data-legal-delete]')) button.addEventListener('click', () => void perform(button, async () => {
+    if (!confirm('Remover este processo do monitoramento? O histórico vinculado também será removido.')) return;
+    await api(`/api/legal/monitors/${button.dataset.legalDelete}`, { method:'DELETE' });
+    await loadLegal();
+    toast('Processo removido do monitoramento.');
+  }));
+}
+async function loadLegal() {
+  const data = await api('/api/legal/monitors');
+  state.legalData = data;
+  state.legal = data.stats || state.legal;
+  renderLegal();
+}
+
+$('legal-monitor-form').addEventListener('submit', event => {
+  event.preventDefault();
+  void perform($('legal-add'), async () => {
+    const result = await api('/api/legal/monitors', { method:'POST', body:{
+      cnj:$('legal-cnj').value,
+      clientName:$('legal-client').value,
+      phone:$('legal-phone').value,
+      mode:$('legal-mode').value,
+      notifyWhatsapp:$('legal-notify').checked
+    }});
+    $('legal-cnj').value = '';
+    $('legal-client').value = '';
+    $('legal-phone').value = '';
+    await loadLegal();
+    toast(result.scan?.newEvents ? 'Processo monitorado e novas movimentações registradas.' : 'Processo monitorado. A linha de base foi criada sem enviar histórico antigo.');
+  });
+});
+onClick('legal-refresh', async () => {
+  const result = await api('/api/legal/scan', { method:'POST', body:{} });
+  await loadLegal();
+  toast(`Varredura concluída: ${number(result.checked)} processo(s), ${number(result.newEvents)} nova(s) movimentação(ões), ${number(result.sent)} aviso(s) enviado(s).`);
+});
+$('legal-import-sheet').addEventListener('change', configureLegalImport);
+for (const id of ['legal-process-column','legal-phone-column','legal-name-column']) $(id).addEventListener('change', () => {
+  $('legal-import-button').disabled = !$('legal-process-column').value || !$('legal-phone-column').value;
+});
+onClick('legal-import-button', async () => {
+  if (!state.imported) throw new Error('Importe uma planilha primeiro.');
+  const result = await api('/api/legal/monitors/import', { method:'POST', body:{
+    importId:state.imported.id,
+    sheet:$('legal-import-sheet').value,
+    processColumn:$('legal-process-column').value,
+    phoneColumn:$('legal-phone-column').value,
+    nameColumn:$('legal-name-column').value,
+    mode:$('legal-import-mode').value,
+    notifyWhatsapp:true
+  }});
+  await loadLegal();
+  toast(`${number(result.created)} processo(s) importado(s) · ${number(result.invalid)} linha(s) inválida(s) · ${number(result.blocked)} bloqueada(s).`);
+});
+
 async function renderBlocked() {
   const rows = await api('/api/suppressions');
   $('blocked-count').textContent = rows.length ? number(rows.length) : '';
@@ -479,6 +605,7 @@ function showPage(page, activeButton = null) {
   for (const section of document.querySelectorAll('main>.page')) section.classList.toggle('hidden', section.id !== `page-${page}`);
   for (const nav of document.querySelectorAll('.sidebar-nav .nav-item')) nav.classList.toggle('active', nav === activeButton);
   if (page === 'blocked') void perform(null, renderBlocked);
+  if (page === 'processes') void perform(null, loadLegal);
 }
 for (const button of document.querySelectorAll('[data-page]')) button.addEventListener('click', () => showPage(button.dataset.page, button.closest('.sidebar-nav') ? button : null));
 $('nav-whatsapp').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
@@ -513,9 +640,12 @@ async function poll() {
     state.online = true;
     state.connection = response.connection;
     state.campaigns = response.campaigns;
+    state.legal = response.legal || state.legal;
     $('global-error').classList.add('hidden');
     renderConnection();
     renderHistory();
+    renderLegal();
+    if (!$('page-processes').classList.contains('hidden')) await loadLegal();
     if ($('campaign-dialog').open && state.activeId) {
       const id = state.activeId;
       const detail = await api(`/api/campaigns/${id}`);
@@ -546,8 +676,10 @@ async function init() {
   state.token = response.csrfToken;
   state.connection = response.connection;
   state.campaigns = response.campaigns;
+  state.legal = response.legal || state.legal;
   renderConnection();
   renderHistory();
+  renderLegal();
 
   if (response.latestImport) {
     const imported = await api(`/api/imports/${response.latestImport.id}`);
