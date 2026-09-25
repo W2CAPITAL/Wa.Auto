@@ -10,7 +10,7 @@ Não exige CNPJ, cadastro de empresa na Meta, API paga, chave de IA ou mensalida
 2. Baixe este repositório em **Code → Download ZIP** e extraia a pasta. Não execute dentro do ZIP.
 3. Abra **`INICIAR-WINDOWS.cmd`**. Na primeira execução ele instala as dependências e baixa o navegador usado na conexão. As próximas aberturas reutilizam a instalação.
 4. O aplicativo abre em **http://127.0.0.1:3210**. Mantenha a janela do programa aberta.
-5. Clique em **WhatsApp desconectado → Gerar QR Code**. No celular, abra **WhatsApp → Aparelhos conectados → Conectar aparelho**.
+5. O WA.Auto já inicia a conexão automaticamente e exibe o **QR Code**. No celular, abra **WhatsApp → Aparelhos conectados → Conectar aparelho**. Se a conexão cair, use **WhatsApp desconectado → Gerar QR Code**.
 6. Importe sua planilha, escolha aba e colunas, escreva a mensagem e clique em **Revisar destinatários**.
 7. Confira os números, desmarque linhas se necessário e use **Enviar um teste para mim**. Esse botão envia uma mensagem real para o telefone indicado.
 8. Dê um nome à campanha, clique em **Salvar campanha** e confira a mensagem e os destinatários. Marque a revisão e clique em **Iniciar envios**.
@@ -100,7 +100,7 @@ Crie um `.env` na raiz somente se precisar alterar os padrões:
 ```dotenv
 PORT=3210
 # WA_DATA_DIR=C:/WA-Auto/dados
-# CHROME_PATH=C:/Program Files/Google/Chrome/Application/chrome.exe
+# CHROME_PATH=C:/Program Files/Google/Chrome/Application/chrome.exe\n# WA_AUTO_CONNECT=1
 ```
 
 No Windows, o app tenta encontrar Chrome ou Edge instalados. Se não encontrar, utiliza o navegador baixado pelo Puppeteer. `CHROME_PATH` e `PUPPETEER_EXECUTABLE_PATH` podem indicar um executável específico.
