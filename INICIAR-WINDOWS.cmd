@@ -28,5 +28,6 @@ if errorlevel 1 (
   node scripts/install-check.js --save
 )
 set "WA_OPEN_BROWSER=1"
+set "WA_AUTO_CONNECT=1"
 call npm start
 pause
