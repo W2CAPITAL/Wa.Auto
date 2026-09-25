@@ -523,6 +523,7 @@ function renderLegal() {
         <div class="legal-monitor-title"><strong>${escape(monitor.client_name)}</strong><span class="subtle-tag">${escape(monitor.mode === 'both' ? 'DataJud + DJEN' : monitor.mode === 'datajud' ? 'DataJud' : 'DJEN')}</span></div>
         <div class="legal-cnj">${escape(monitor.cnj.replace(/(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})/, '$1-$2.$3.$4.$5.$6'))}</div>
         <small>+${escape(monitor.phone)} · ${monitor.enabled ? 'monitoramento ativo' : 'pausado'} · último check: ${escape(legalDate(monitor.last_checked_at))}</small>
+        <small>Último retorno: <b>${escape(legalDate(monitor.last_return_at))}</b>${monitor.last_notified_at ? ` · última movimentação enviada: <b>${escape(legalDate(monitor.last_notified_at))}</b>` : ''}${monitor.next_return_at ? ` · próximo retorno: <b>${escape(legalDate(monitor.next_return_at))}</b>` : ''}</small>
         ${monitor.last_event_text ? `<p><b>${escape(monitor.last_event_source || '')}</b> · ${escape(monitor.last_event_text)}</p>` : ''}
         ${monitor.error ? `<div class="legal-source-error">${escape(monitor.error)}</div>` : ''}
       </div>
