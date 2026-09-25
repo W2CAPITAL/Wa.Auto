@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { parseSpreadsheet } from './importer.js';
 import { analyzeContacts, createCampaign, prepareCampaign, csvReport } from './campaigns.js';
-import { normalizePhone } from './phone.js';
+import { affirmative, blockedInRow, normalizePhone } from './phone.js';
 import { AppError, requireValue } from './errors.js';
 import { normalizeCnj, resolveDataJudAlias } from './legal-monitor.js';
 
@@ -155,13 +155,21 @@ export function createApp({ store, transport, queue, legalMonitor = null, onMuta
     requireValue(sheet.headers.includes(req.body?.processColumn), 'Selecione a coluna do processo.');
     requireValue(sheet.headers.includes(req.body?.phoneColumn), 'Selecione a coluna de telefone.');
     const nameColumn = sheet.headers.includes(req.body?.nameColumn) ? req.body.nameColumn : '';
-    let created = 0, invalid = 0, blocked = 0;
+    const consentColumn = sheet.headers.includes(req.body?.consentColumn) ? req.body.consentColumn : '';
+    const blockedPhones = new Set(
+      sheet.rows
+        .filter(row => blockedInRow(row.values))
+        .map(row => normalizePhone(row.values[req.body.phoneColumn], '55').phone)
+        .filter(Boolean)
+    );
+    let created = 0, invalid = 0, blocked = 0, withoutConsent = 0;
     const ids = [];
     for (const row of sheet.rows) {
       const cnj = normalizeCnj(row.values[req.body.processColumn]);
       const { phone } = normalizePhone(row.values[req.body.phoneColumn], '55');
       if (!cnj || !phone) { invalid++; continue; }
-      if (store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { blocked++; continue; }
+      if (blockedInRow(row.values) || blockedPhones.has(phone) || store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { blocked++; continue; }
+      if (consentColumn && !affirmative(row.values[consentColumn])) { withoutConsent++; continue; }
       const monitor = store.createLegalMonitor({
         cnj,
         clientName:String(nameColumn ? row.values[nameColumn] || 'Cliente' : 'Cliente').trim().slice(0,160) || 'Cliente',
@@ -172,7 +180,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, onMuta
       });
       ids.push(monitor.id); created++;
     }
-    res.status(201).json({ created, invalid, blocked, monitors:ids });
+    res.status(201).json({ created, invalid, blocked, withoutConsent, monitors:ids });
   });
   app.post('/api/legal/monitors/:id/toggle', (req, res) => {
     const current = store.legalMonitor(req.params.id);
