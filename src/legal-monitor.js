@@ -265,7 +265,9 @@ export class LegalMonitorService {
     const errors = [];
     if (sources.DataJud === false) errors.push('DataJud indisponível nesta consulta');
     if (sources.DJEN === false) errors.push('DJEN indisponível nesta consulta');
-    const sorted = fetched.sort((a,b) => a.eventAt.localeCompare(b.eventAt));
+    const sorted = fetched
+      .sort((a,b) => a.eventAt.localeCompare(b.eventAt))
+      .slice(-120);
     const baseline = !monitor.last_event_at;
     let newEvents = 0;
     for (const event of sorted) {
@@ -299,6 +301,7 @@ export class LegalMonitorService {
   }
 
   async sendPendingNotifications() {
+    if (this.store.active()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length };
     if (!this.transport.isReady()) return { sent:0, failed:0, waiting:this.store.pendingLegalEvents(100).length };
     let sent = 0, failed = 0;
     for (const event of this.store.pendingLegalEvents(25)) {
@@ -317,7 +320,7 @@ export class LegalMonitorService {
         this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
         sent++;
         this.onMutation();
-        await sleep(1600);
+        await sleep(5000);
       } catch (error) {
         this.store.markLegalEvent(event.id, { sendStatus:'failed', error:String(error?.message || 'Falha no envio').slice(0,500) });
         failed++;
