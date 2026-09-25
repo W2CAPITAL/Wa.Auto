@@ -10,9 +10,11 @@ const timeout = (promise, milliseconds) => {
   return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('O WhatsApp demorou demais para responder.')), milliseconds); })]).finally(() => clearTimeout(timer));
 };
 export class WhatsApp extends EventEmitter {
-  constructor(dataDir) {
+  constructor(dataDir, { packageLoader = () => import('whatsapp-web.js'), qrEncoder = (code, options) => QRCode.toDataURL(code, options) } = {}) {
     super();
     this.dataDir = dataDir;
+    this.packageLoader = packageLoader;
+    this.qrEncoder = qrEncoder;
     this.state = { status: 'disconnected', qr: null, account: null, message: 'Conecte seu WhatsApp para começar.' };
     this.generation = 0;
     this.connecting = false;
@@ -26,8 +28,10 @@ export class WhatsApp extends EventEmitter {
     try {
       await this.close();
       const generation = ++this.generation;
-      const { default: pkg } = await import('whatsapp-web.js');
+      const module = await this.packageLoader();
+      const pkg = module?.default || module;
       const { Client, LocalAuth } = pkg;
+      requireValue(Client && LocalAuth, 'A integração do WhatsApp não carregou corretamente.');
       const chromeCandidates = [process.env.CHROME_PATH, process.env.PUPPETEER_EXECUTABLE_PATH];
       if (process.platform === 'win32') {
         for (const root of [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean)) {
@@ -47,7 +51,7 @@ export class WhatsApp extends EventEmitter {
       const current = () => this.client === client && generation === this.generation;
       this.update({ status: 'connecting', qr: null, account: null, message: 'Abrindo a conexão com o WhatsApp…' });
       client.on('qr', code => {
-        void QRCode.toDataURL(code, { margin: 2, width: 280 }).then(qr => {
+        void this.qrEncoder(code, { margin: 2, width: 280 }).then(qr => {
           if (current()) this.update({ status: 'qr', qr, message: 'Escaneie com WhatsApp → Aparelhos conectados → Conectar aparelho.' });
         }).catch(() => { if (current()) this.update({ status: 'error', qr: null, message: 'Não foi possível gerar o QR Code. Tente conectar novamente.' }); });
       });
