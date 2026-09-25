@@ -285,9 +285,9 @@ function refreshControls() {
   disable('review', !state.imported || !$('phone-column').value || !$('template').value.trim() || !state.online);
   disable('save-campaign', !state.preview || !state.selected.size || state.saved || !state.online);
   disable('test-message', !state.preview || !state.selected.size || !state.online);
-  disable('connect-action', !state.online);
-  disable('pair-action', !state.online || state.connection.status === 'ready');
-  disable('forget-session', !state.online);
+  disable('connect-action', !state.online && !(HOSTED_MODE && !state.engineAvailable));
+  disable('pair-action', !state.online || state.connection.status === 'ready' || (HOSTED_MODE && !state.engineAvailable));
+  disable('forget-session', !state.online || (HOSTED_MODE && !state.engineAvailable));
   if (state.detail) {
     const campaign = state.detail.campaign;
     const canStart = ['draft', 'paused'].includes(campaign.status) && campaign.counts.pending > 0;
