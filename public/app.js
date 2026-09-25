@@ -80,7 +80,7 @@ function configureSheet(saved = {}) {
   });
   if ($('filter-column').value) void perform(null, () => loadFilterValues(saved.filterValue));
   invalidate();
-  void loadContacts();
+  void perform(null, loadContacts);
 }
 function setImport(imported, draft = {}) {
   state.imported = imported;
