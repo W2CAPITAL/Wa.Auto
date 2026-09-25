@@ -31,6 +31,17 @@ test('API: upload → revisão → rascunho → início → confirmação → re
   await queue.tick();await queue.tick();assert.equal(transport.sent.length,1);
   const details=await (await fetch(`${base}/api/campaigns/${campaign.id}`)).json();assert.equal(details.campaign.status,'completed');assert.equal(details.entries[0].message,'Olá, Ana!');
   const csv=await (await fetch(`${base}/api/campaigns/${campaign.id}/report.csv`)).text();assert.match(csv,/Olá, Ana!/);assert.match(csv,/test-1/);
+  const uncertainId=store.createCampaign('Conferência manual',{intervalSeconds:10},[
+    {row:1,name:'Bia',phone:'5511999990002',rawPhone:'11999990002',values:{},message:'Olá, Bia!',status:'uncertain'}
+  ]);
+  store.setCampaign(uncertainId,'paused','Confira a conversa');
+  const uncertainEntry=store.entries(uncertainId)[0];
+  const manualUrl=`${base}/api/campaigns/${uncertainId}/entries/${uncertainEntry.id}/resolve`;
+  assert.equal((await fetch(manualUrl,{method:'POST',headers,body:'{"action":"sent"}'})).status,200);
+  assert.equal(store.entries(uncertainId)[0].status,'sent');assert.equal(store.campaign(uncertainId).status,'completed');
+  store.updateEntry(uncertainEntry.id,{status:'uncertain',reason:'Conferir novamente'});store.setCampaign(uncertainId,'paused');
+  assert.equal((await fetch(manualUrl,{method:'POST',headers,body:'{"action":"retry"}'})).status,200);
+  assert.equal(store.entries(uncertainId)[0].status,'pending');
   assert.equal((await fetch(`${base}/api/anything`,{method:'POST',headers,body:'not json'})).status,400);
   const page=await fetch(base);assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);
 });
