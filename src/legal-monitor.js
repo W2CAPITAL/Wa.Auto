@@ -207,7 +207,7 @@ export class LegalMonitorService {
 
   start() {
     clearInterval(this.timer);
-    this.timer = setInterval(() => void this.scanAll().catch(error => console.error('Monitor jurídico:', error.message)), this.scanIntervalMs);
+    this.timer = setInterval(() => void this.trigger({ force:true }).catch(error => console.error('Monitor jurídico:', error.message)), this.scanIntervalMs);
     this.timer.unref?.();
   }
 
@@ -223,23 +223,37 @@ export class LegalMonitorService {
       return { skipped:true, reason:'cooldown', nextInMs:this.minTriggerIntervalMs - (now - last), ...this.snapshot() };
     }
     this.store.setMeta('legalLastTriggeredAt', String(now));
-    return this.scanAll();
+    return this.scanAll({ limit:20, useCursor:true });
   }
 
-  async scanAll() {
+  async scanAll({ limit = 20, useCursor = true } = {}) {
     if (this.busy) return { skipped:true, reason:'busy', ...this.snapshot() };
     this.busy = true;
-    const result = { checked:0, newEvents:0, sent:0, failed:0, sources:{ DataJud:{ok:0,error:0}, DJEN:{ok:0,error:0} } };
+    const result = { checked:0, total:0, cursor:0, newEvents:0, sent:0, failed:0, sources:{ DataJud:{ok:0,error:0}, DJEN:{ok:0,error:0} } };
     try {
       const monitors = this.store.legalMonitors().filter(item => item.enabled);
-      for (const monitor of monitors) {
+      result.total = monitors.length;
+      let selected = monitors;
+      if (useCursor && limit && monitors.length > limit) {
+        const current = Math.max(0, Number(this.store.getMeta('legalScanCursor') || 0)) % monitors.length;
+        selected = [];
+        for (let index = 0; index < Math.min(limit, monitors.length); index++) selected.push(monitors[(current + index) % monitors.length]);
+        const next = (current + selected.length) % monitors.length;
+        this.store.setMeta('legalScanCursor', String(next));
+        result.cursor = next;
+      } else {
+        result.cursor = 0;
+        this.store.setMeta('legalScanCursor', '0');
+      }
+
+      for (const monitor of selected) {
         const one = await this.scanOne(monitor);
         result.checked++;
         result.newEvents += one.newEvents;
         result.sent += one.sent;
         result.failed += one.failed;
         for (const [source, status] of Object.entries(one.sources)) result.sources[source][status ? 'ok' : 'error']++;
-        await sleep(450);
+        await sleep(300);
       }
       this.store.setMeta('legalLastScanAt', new Date().toISOString());
       this.onMutation();
@@ -253,15 +267,16 @@ export class LegalMonitorService {
     const monitor = typeof monitorOrId === 'string' ? this.store.legalMonitor(monitorOrId) : monitorOrId;
     const sources = {};
     const fetched = [];
+    const jobs = [];
     if (monitor.mode === 'datajud' || monitor.mode === 'both') {
-      const datajud = await fetchDataJudProcess(monitor.cnj, { fetchImpl:this.fetchImpl });
-      sources.DataJud = datajud.ok;
-      if (datajud.ok) fetched.push(...datajud.events);
+      jobs.push(fetchDataJudProcess(monitor.cnj, { fetchImpl:this.fetchImpl }).then(result => ['DataJud', result]));
     }
     if (monitor.mode === 'djen' || monitor.mode === 'both') {
-      const djen = await fetchDjenProcess(monitor.cnj, { fetchImpl:this.fetchImpl });
-      sources.DJEN = djen.ok;
-      if (djen.ok) fetched.push(...djen.events);
+      jobs.push(fetchDjenProcess(monitor.cnj, { fetchImpl:this.fetchImpl }).then(result => ['DJEN', result]));
+    }
+    for (const [sourceName, result] of await Promise.all(jobs)) {
+      sources[sourceName] = result.ok;
+      if (result.ok) fetched.push(...result.events);
     }
 
     const errors = [];
