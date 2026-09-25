@@ -16,3 +16,13 @@ services:
         sync: false
       - key: WA_DB_SECRET
         sync: false
+      - key: WA_MEMORY_LIMIT_MB
+        value: "512"
+      - key: WA_MEMORY_PAUSE_MB
+        value: "430"
+      - key: WA_MEMORY_RESUME_MB
+        value: "360"
+      - key: WA_HISTORY_RETENTION_DAYS
+        value: "30"
+      - key: WA_LEGAL_SEND_DELAY_MS
+        value: "30000"
