@@ -103,8 +103,9 @@ test('WhatsApp cloud: logout remoto exige novo QR e QR inválido mostra erro', a
   await tick();
   assert.equal(transport.snapshot().status, 'error');
   FakeSocket.instance.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
-  assert.equal(transport.snapshot().status, 'error');
-  assert.match(transport.snapshot().message, /novo QR Code/i);
+  await tick(); await tick();
+  assert.equal(transport.snapshot().status, 'disconnected');
+  assert.match(transport.snapshot().message, /sessão expirou/i);
   await transport.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
