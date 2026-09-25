@@ -12,18 +12,43 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: Acordar WA.Auto e verificar DataJud/DJEN
+      - name: Acordar WA.Auto
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent             --retry 3 --retry-delay 15 --max-time 240             "https://wa-auto-cloud.onrender.com/api/legal/cron"             | tee /tmp/scan.json
+          for i in $(seq 1 18); do
+            if curl --fail --show-error --silent --connect-timeout 15 --max-time 45               "https://wa-auto-cloud.onrender.com/api/health" >/tmp/health.json; then
+              cat /tmp/health.json
+              break
+            fi
+            if [ "$i" -eq 18 ]; then
+              echo "WA.Auto não acordou a tempo."
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Verificar DataJud e DJEN
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 6); do
+            if curl --fail --show-error --silent --connect-timeout 20 --max-time 240               "https://wa-auto-cloud.onrender.com/api/legal/cron" | tee /tmp/scan.json; then
+              ok=1
+              break
+            fi
+            sleep 20
+          done
+          [ "$ok" -eq 1 ] || { echo "Varredura jurídica falhou após tentativas."; exit 1; }
           python - <<'PY'
-          import json
-          data=json.load(open('/tmp/scan.json'))
-          print("checked:", data.get("checked", 0))
-          print("newEvents:", data.get("newEvents", 0))
-          print("sent:", data.get("sent", 0))
-          print("failed:", data.get("failed", 0))
-          print("skipped:", data.get("skipped", False), data.get("reason", ""))
-          PY
+import json
+data=json.load(open('/tmp/scan.json'))
+print("checked:", data.get("checked", 0))
+print("newEvents:", data.get("newEvents", 0))
+print("sent:", data.get("sent", 0))
+print("failed:", data.get("failed", 0))
+print("skipped:", data.get("skipped", False), data.get("reason", ""))
+if data.get("reason") == "memory-pressure":
+    print("Varredura adiada por proteção de memória; próximo ciclo tentará novamente.")
+PY
