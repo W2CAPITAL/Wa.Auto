@@ -6,7 +6,11 @@ title WA.Auto - Inicializador
 set "WA_DATA_DIR=%LOCALAPPDATA%\WA.Auto\data"
 set "WA_LOG_DIR=%LOCALAPPDATA%\WA.Auto\logs"
 set "WA_OPEN_BROWSER=0"
-set "WA_AUTO_CONNECT=1"
+if /I "%WA_STARTUP_TEST%"=="1" (
+  set "WA_AUTO_CONNECT=0"
+) else (
+  set "WA_AUTO_CONNECT=1"
+)
 set "RUNTIME=%~dp0.runtime\node"
 set "TMPNODE=%~dp0.runtime\download"
 set "NODE_EXE="
@@ -104,7 +108,7 @@ if not errorlevel 1 (
   goto :open_app
 )
 
-start "WA.Auto Motor" /B cmd /c ""%NODE_EXE%" src\server.js 1>>"%LOG%" 2>>&1"
+start "WA.Auto Motor" /B "%NODE_EXE%" src\server.js 1>>"%LOG%" 2>>&1
 
 set /a WAIT=0
 :wait_health
@@ -118,6 +122,11 @@ goto :wait_health
 :open_app
 echo.
 echo [5/5] WA.Auto pronto.
+if /I "%WA_STARTUP_TEST%"=="1" (
+  echo TESTE_OK: http://127.0.0.1:3210/api/health respondeu.
+  for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:"127.0.0.1:3210 .*LISTENING"') do taskkill /PID %%P /T /F >nul 2>nul
+  exit /b 0
+)
 echo Abrindo http://127.0.0.1:3210
 start "" "http://127.0.0.1:3210"
 echo.
