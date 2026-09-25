@@ -103,6 +103,7 @@ function configureLegalImport() {
   options($('legal-process-column'), sheet.headers, guess([/process/i,/cnj/i,/n[uú]mero.*process/i]), 'Selecione');
   options($('legal-phone-column'), sheet.headers, guess([/telefone/i,/celular/i,/whats/i,/fone/i]), 'Selecione');
   options($('legal-name-column'), sheet.headers, guess([/cliente/i,/nome/i,/parte/i]), 'Não usar');
+  options($('legal-consent-column'), sheet.headers, guess([/autoriz/i,/consent/i,/opt.?in/i,/whats.*ok/i]), 'Não usar');
   $('legal-import-button').disabled = !$('legal-process-column').value || !$('legal-phone-column').value;
 }
 
@@ -573,7 +574,7 @@ onClick('legal-refresh', async () => {
   toast(`Varredura concluída: ${number(result.checked)} processo(s), ${number(result.newEvents)} nova(s) movimentação(ões), ${number(result.sent)} aviso(s) enviado(s).`);
 });
 $('legal-import-sheet').addEventListener('change', configureLegalImport);
-for (const id of ['legal-process-column','legal-phone-column','legal-name-column']) $(id).addEventListener('change', () => {
+for (const id of ['legal-process-column','legal-phone-column','legal-name-column','legal-consent-column']) $(id).addEventListener('change', () => {
   $('legal-import-button').disabled = !$('legal-process-column').value || !$('legal-phone-column').value;
 });
 onClick('legal-import-button', async () => {
@@ -584,11 +585,12 @@ onClick('legal-import-button', async () => {
     processColumn:$('legal-process-column').value,
     phoneColumn:$('legal-phone-column').value,
     nameColumn:$('legal-name-column').value,
+    consentColumn:$('legal-consent-column').value,
     mode:$('legal-import-mode').value,
     notifyWhatsapp:true
   }});
   await loadLegal();
-  toast(`${number(result.created)} processo(s) importado(s) · ${number(result.invalid)} linha(s) inválida(s) · ${number(result.blocked)} bloqueada(s).`);
+  toast(`${number(result.created)} processo(s) importado(s) · ${number(result.invalid)} inválido(s) · ${number(result.blocked)} bloqueado(s) · ${number(result.withoutConsent || 0)} sem autorização.`);
 });
 
 async function renderBlocked() {
