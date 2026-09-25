@@ -52,8 +52,10 @@ export class WhatsApp extends EventEmitter {
       this.update({ status: 'connecting', qr: null, account: null, message: 'Abrindo a conexão com o WhatsApp…' });
       client.on('qr', code => {
         void this.qrEncoder(code, { margin: 2, width: 280 }).then(qr => {
-          if (current()) this.update({ status: 'qr', qr, message: 'Escaneie com WhatsApp → Aparelhos conectados → Conectar aparelho.' });
-        }).catch(() => { if (current()) this.update({ status: 'error', qr: null, message: 'Não foi possível gerar o QR Code. Tente conectar novamente.' }); });
+          if (current() && !['authenticated', 'ready'].includes(this.state.status)) this.update({ status: 'qr', qr, message: 'Escaneie com WhatsApp → Aparelhos conectados → Conectar aparelho.' });
+        }).catch(() => {
+          if (current() && !['authenticated', 'ready'].includes(this.state.status)) this.update({ status: 'error', qr: null, message: 'Não foi possível gerar o QR Code. Tente conectar novamente.' });
+        });
       });
       client.on('authenticated', () => { if (current()) this.update({ status: 'authenticated', qr: null, message: 'Conta vinculada. Carregando suas conversas…' }); });
       client.on('ready', () => {
