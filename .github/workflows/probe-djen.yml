@@ -9,15 +9,22 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Consultar proxy DJEN
+      - name: Consultar DJEN oficial e proxy
         shell: bash
         run: |
           set -uo pipefail
-          URL='https://wa-auto-djen-proxy-w2-capital.vercel.app/api/djen-proxy?cnj=1030082-54.2024.8.26.0002&start=2025-09-25&end=2026-09-25'
-          echo "PROXY_URL=$URL"
-          curl -L -sS --max-time 35 -D /tmp/headers "$URL" -o /tmp/body || true
-          echo "--- HEADERS ---"
-          cat /tmp/headers || true
-          echo "--- BODY ---"
-          head -c 12000 /tmp/body || true
+          DIRECT='https://comunicaapi.pje.jus.br/api/v1/comunicacao?numeroProcesso=1030082-54.2024.8.26.0002&dataDisponibilizacaoInicio=2025-09-25&dataDisponibilizacaoFim=2026-09-25&pagina=1&itensPorPagina=50'
+          echo '=== DIRECT DJEN ==='
+          curl -sS --max-time 35 -A 'Mozilla/5.0' -H 'Accept: application/json' -H 'Origin: https://comunica.pje.jus.br' -H 'Referer: https://comunica.pje.jus.br/' -D /tmp/direct-h "$DIRECT" -o /tmp/direct-b || true
+          cat /tmp/direct-h || true
+          echo '--- BODY ---'
+          head -c 20000 /tmp/direct-b || true
+          echo
+
+          PROXY='https://wa-auto-djen-proxy-w2-capital.vercel.app/api/djen-proxy?cnj=1030082-54.2024.8.26.0002&start=2025-09-25&end=2026-09-25'
+          echo '=== VERCEL PROXY ==='
+          curl -sS --max-time 35 -D /tmp/proxy-h "$PROXY" -o /tmp/proxy-b || true
+          cat /tmp/proxy-h || true
+          echo '--- BODY ---'
+          head -c 4000 /tmp/proxy-b || true
           echo
