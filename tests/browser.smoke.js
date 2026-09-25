@@ -15,7 +15,12 @@ const store = new Store(':memory:');
 const transport = new TestTransport();
 transport.ready = false;
 const queue = new Queue(store, transport, { autoTick: false });
-const server = createApp({ store, transport, queue }).listen(0, '127.0.0.1');
+const legalMonitor = {
+  snapshot: () => ({ ...store.legalStats(), busy: false }),
+  scanOne: async () => ({ newEvents: 0, sent: 0, failed: 0, sources: { DataJud: true } }),
+  trigger: async () => ({ checked: store.legalMonitors().filter(item => item.enabled).length, newEvents: 0, sent: 0, failed: 0, ...store.legalStats(), busy: false }),
+};
+const server = createApp({ store, transport, queue, legalMonitor }).listen(0, '127.0.0.1');
 await once(server, 'listening');
 fs.mkdirSync('test-results', { recursive: true });
 let browser;
@@ -44,7 +49,7 @@ try {
 
   await page.screenshot({ path: 'test-results/01-desktop.png', fullPage: true });
   const fixturePath = path.join(temp, 'clientes-exemplo.csv');
-  fs.writeFileSync(fixturePath, 'Cliente;Telefone;Observacoes\nAna Exemplo;11999990001;\nBruno Exemplo;21999990002;\nAna Repetida;11999990001;\nCliente sem telefone;;\nContato bloqueado;31999990003;NÃO FALAR\n');
+  fs.writeFileSync(fixturePath, 'Cliente;Telefone;Processo;Autorizado;Observacoes\nAna Exemplo;11999990001;00000000020268260000;sim;\nBruno Exemplo;21999990002;00000010020268260000;sim;\nAna Repetida;11999990001;00000000020268260000;sim;\nCliente sem telefone;;00000020020268260000;sim;\nContato bloqueado;31999990003;00000030020268260000;sim;NÃO FALAR\n');
   await (await page.$('#file-input')).uploadFile(fixturePath);
   await page.waitForFunction(() => !document.getElementById('mapping').classList.contains('hidden'));
   assert.equal(await page.$eval('#phone-column', el => el.value), 'Telefone');
@@ -87,6 +92,29 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'test-results/02-campanha-desktop.png', fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Desktop horizontal overflow');
+  await page.click('[data-page="processes"]');
+  await page.waitForFunction(() => !document.getElementById('page-processes').classList.contains('hidden'));
+  assert.match(await page.$eval('#page-processes', el => el.innerText), /Atualizações processuais automáticas/);
+  assert.equal(await page.$eval('#legal-process-column', el => el.value), 'Processo');
+  assert.equal(await page.$eval('#legal-phone-column', el => el.value), 'Telefone');
+  assert.equal(await page.$eval('#legal-consent-column', el => el.value), 'Autorizado');
+  assert.equal(await page.$eval('#legal-import-button', el => el.disabled), false);
+  await page.click('#legal-import-button');
+  await page.waitForFunction(() => document.getElementById('legal-monitor-list').textContent.includes('Ana Exemplo'));
+  assert.match(await page.$eval('#legal-monitor-list', el => el.innerText), /Bruno Exemplo/);
+  assert.doesNotMatch(await page.$eval('#legal-monitor-list', el => el.innerText), /Contato bloqueado/);
+  assert.equal(store.legalMonitors().length, 2);
+  await page.type('#legal-cnj', '0000004-00.2026.8.26.0000');
+  await page.type('#legal-client', 'Cliente Manual');
+  await page.type('#legal-phone', '41999990004');
+  await page.select('#legal-mode', 'datajud');
+  await page.click('#legal-add');
+  await page.waitForFunction(() => document.getElementById('legal-monitor-list').textContent.includes('Cliente Manual'));
+  assert.equal(store.legalMonitors().length, 3);
+  await page.click('#legal-refresh');
+  await page.waitForFunction(() => document.getElementById('legal-stat-monitored').textContent === '3');
+  await page.screenshot({ path: 'test-results/02b-processos-desktop.png', fullPage: true });
+
   await page.click('[data-page="blocked"]');
   assert.match(await page.$eval('.license-section', el => el.innerText), /W1\/W2 Soluções Capitais/);
   assert.match(await page.$eval('.license-section', el => el.innerText), /Davi Alves Figueredo/);
