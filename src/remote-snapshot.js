@@ -42,6 +42,8 @@ export class RemoteSnapshot {
     this.timer = null;
     this.saving = null;
     this.dirty = false;
+    this.intentActive = false;
+    this.intentArmed = false;
   }
 
   get configured() { return !!(this.url && this.key && this.secret); }
@@ -53,6 +55,48 @@ export class RemoteSnapshot {
       'x-wa-secret': this.secret,
       ...extra,
     };
+  }
+
+  async getIntent() {
+    if (!this.configured) return null;
+    const response = await this.fetch(`${this.url}/rest/v1/wa_auto_intents?id=eq.active&select=kind,payload,created_at&limit=1`, {
+      headers: this.headers({ Accept: 'application/json' }),
+    });
+    if (!response.ok) throw new Error(`Falha ao consultar o diário de envio crítico (${response.status}).`);
+    const rows = await response.json();
+    return rows?.[0] || null;
+  }
+
+  async beginIntent(kind, payload) {
+    if (!this.configured) throw new Error('Persistência remota indisponível para registrar o envio.');
+    const existing = await this.getIntent();
+    if (existing) throw new Error('Existe um envio anterior ainda em recuperação. Aguarde a persistência concluir.');
+    const response = await this.fetch(`${this.url}/rest/v1/wa_auto_intents?on_conflict=id`, {
+      method: 'POST',
+      headers: this.headers({
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      }),
+      body: JSON.stringify([{ id: 'active', kind, payload, created_at: new Date().toISOString() }]),
+    });
+    if (!response.ok) throw new Error(`Falha ao proteger o envio contra reinício (${response.status}).`);
+    this.intentActive = true;
+    this.intentArmed = false;
+  }
+
+  armIntent() {
+    if (this.intentActive) this.intentArmed = true;
+  }
+
+  async clearIntent() {
+    if (!this.configured) return;
+    const response = await this.fetch(`${this.url}/rest/v1/wa_auto_intents?id=eq.active`, {
+      method: 'DELETE',
+      headers: this.headers({ Prefer: 'return=minimal' }),
+    });
+    if (!response.ok) throw new Error(`Falha ao limpar o diário de envio crítico (${response.status}).`);
+    this.intentActive = false;
+    this.intentArmed = false;
   }
 
   async restore(dataDir) {
@@ -90,6 +134,7 @@ export class RemoteSnapshot {
           body: JSON.stringify([{ id: 'default', payload, updated_at: new Date().toISOString() }]),
         });
         if (!response.ok) throw new Error(`Falha ao salvar estado remoto (${response.status}): ${await response.text()}`);
+        if (this.intentActive && this.intentArmed) await this.clearIntent();
       } finally {
         this.saving = null;
       }
