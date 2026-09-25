@@ -220,6 +220,27 @@ export function formatProcessMessage(monitor, event) {
   ].join('');
 }
 
+export function formatCurrentProcessReturn(cnj, event) {
+  const when = new Date(event.eventAt || event.event_at);
+  const date = Number.isFinite(when.getTime())
+    ? when.toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', dateStyle:'short', timeStyle:'short' })
+    : (event.eventAt || event.event_at || '—');
+  const details = event.details && event.details !== event.title
+    ? `\n\nDetalhe: ${String(event.details).slice(0,1200)}`
+    : '';
+  return [
+    '📌 *RETORNO PROCESSUAL*',
+    `\nProcesso: *${formatCnj(cnj)}*`,
+    `\nFonte: *${event.source}*`,
+    `\nMovimentação mais recente localizada: ${event.title}`,
+    details,
+    `\nData/Hora: ${date}`,
+    '\n\nSeguimos acompanhando as próximas movimentações do processo.',
+    '\nEsta mensagem é informativa e reproduz o andamento público localizado no tribunal.',
+    '\n\nResponda SAIR se não quiser receber novos avisos.'
+  ].join('').slice(0,7600);
+}
+
 export function formatProcessDigest(monitor, events) {
   const ordered = [...events].sort((a,b) => String(a.event_at || a.eventAt).localeCompare(String(b.event_at || b.eventAt)));
   if (ordered.length === 1) {
@@ -471,6 +492,93 @@ export class LegalMonitorService {
 
     const sentResult = await this.sendPendingNotifications({ maxGroups:1 });
     return { newEvents, sent:sentResult.sent, failed:sentResult.failed, sources };
+  }
+
+  async sendOneOffProcessReturn({ cnj, phone, requestId }) {
+    const digits = normalizeCnj(cnj);
+    if (!digits) throw new Error('Número CNJ inválido para o retorno.');
+    if (!phone) throw new Error('Telefone não informado para o retorno.');
+    if (!requestId) throw new Error('Identificador do retorno não informado.');
+
+    const existingMonitor = this.store.legalMonitors().find(item => item.cnj === digits && item.phone === phone);
+    const monitor = existingMonitor || this.store.createLegalMonitor({
+      cnj:digits,
+      clientName:'',
+      phone,
+      tribunalAlias:resolveDataJudAlias(digits),
+      mode:'both',
+      notifyWhatsapp:true
+    });
+
+    const [datajud, djen] = await Promise.all([
+      fetchDataJudProcess(digits, { fetchImpl:this.fetchImpl }),
+      fetchDjenProcess(digits, { fetchImpl:this.fetchImpl })
+    ]);
+    const candidates = [...(datajud.ok ? datajud.events : []), ...(djen.ok ? djen.events : [])]
+      .filter(event => event?.eventAt && event.eventAt > '1971-01-01T00:00:00.000Z')
+      .sort((a,b) => b.eventAt.localeCompare(a.eventAt));
+    const latest = candidates[0];
+    if (!latest) {
+      const reasons = [datajud.error, djen.error].filter(Boolean).join(' · ');
+      throw new Error(reasons || 'Nenhuma movimentação pública foi localizada para o processo.');
+    }
+
+    const eventHash = sha(`OneOff|${requestId}|${latest.hash}`);
+    let event = this.store.recordLegalEvent({
+      monitorId:monitor.id,
+      eventHash,
+      source:latest.source,
+      title:latest.title,
+      details:latest.details || '',
+      eventAt:latest.eventAt,
+      sendStatus:'waiting'
+    });
+
+    if (['sent','delivered','read','uncertain'].includes(event.send_status)) {
+      return { status:event.send_status, alreadyProcessed:true, source:event.source, eventAt:event.event_at, title:event.title, messageId:event.message_id || null };
+    }
+    if (!this.transport.isReady()) throw new Error('WhatsApp não está conectado.');
+    if (this.store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) {
+      this.store.markLegalEvent(event.id, { sendStatus:'blocked', error:'Contato está na lista de não contatar.' });
+      this.onMutation();
+      throw new Error('Contato está na lista de não contatar.');
+    }
+
+    const jid = await this.transport.resolve(phone);
+    if (!jid) {
+      this.store.markLegalEvent(event.id, { sendStatus:'failed', error:'Número não encontrado no WhatsApp.' });
+      this.onMutation();
+      throw new Error('Número não encontrado no WhatsApp.');
+    }
+
+    let attempted = false;
+    try {
+      if (this.criticalIntent) await this.criticalIntent.begin('legal', { monitorId:monitor.id, eventIds:[event.id], phone, jid, requestId });
+      this.store.markLegalEvent(event.id, { sendStatus:'sending', error:'' });
+      attempted = true;
+      this.criticalIntent?.arm();
+      this.onMutation();
+
+      const result = await this.transport.send(jid, formatCurrentProcessReturn(digits, latest));
+      this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
+      const sentAt = new Date().toISOString();
+      this.store.markLegalNotified(monitor.id, [event], sentAt);
+      this.store.setMeta('oneOffReturn:' + requestId, JSON.stringify({
+        cnj:digits, phone, eventHash, source:latest.source, eventAt:latest.eventAt,
+        title:latest.title, sentAt, messageId:result?.id || null
+      }));
+      this.onMutation();
+      return { status:'sent', source:latest.source, eventAt:latest.eventAt, title:latest.title, messageId:result?.id || null, datajudOk:datajud.ok, djenOk:djen.ok };
+    } catch (error) {
+      const message = String(error?.message || 'Falha no envio').slice(0,500);
+      if (attempted) {
+        this.store.markLegalEvent(event.id, { sendStatus:'uncertain', error:'Envio sem confirmação. Não haverá reenvio automático deste teste.' });
+      } else {
+        this.store.markLegalEvent(event.id, { sendStatus:'failed', error:message });
+      }
+      this.onMutation();
+      throw error;
+    }
   }
 
   async sendPendingNotifications({ maxGroups = 25 } = {}) {
