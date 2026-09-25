@@ -1,0 +1,29 @@
+name: Monitorar processos
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: wa-auto-process-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Acordar WA.Auto e verificar DataJud/DJEN
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent             --retry 3 --retry-delay 15 --max-time 240             "https://wa-auto-cloud.onrender.com/api/legal/cron"             | tee /tmp/scan.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/scan.json'))
+          print("checked:", data.get("checked", 0))
+          print("newEvents:", data.get("newEvents", 0))
+          print("sent:", data.get("sent", 0))
+          print("failed:", data.get("failed", 0))
+          print("skipped:", data.get("skipped", False), data.get("reason", ""))
+          PY
