@@ -608,12 +608,17 @@ onClick('legal-import-button', async () => {
     processColumn:$('legal-process-column').value,
     phoneColumn:$('legal-phone-column').value,
     nameColumn:$('legal-name-column').value,
+    lastReturnColumn:$('legal-last-return-column').value,
+    nextReturnColumn:$('legal-next-return-column').value,
+    movementDateColumn:$('legal-movement-date-column').value,
+    movementTextColumn:$('legal-movement-text-column').value,
     consentColumn:$('legal-consent-column').value,
     mode:$('legal-import-mode').value,
     notifyWhatsapp:true
   }});
   await loadLegal();
-  toast(`${number(result.created)} processo(s) importado(s) · ${number(result.duplicates || 0)} repetido(s) · ${number(result.invalid)} inválido(s) · ${number(result.blocked)} bloqueado(s) · ${number(result.withoutConsent || 0)} sem autorização.`);
+  $('legal-import-result').textContent = `${number(result.created)} monitorado(s) · ${number(result.queued)} movimentação(ões) depois do último retorno · ${number(result.covered)} já coberta(s) · ${number(result.missingReturn)} sem data de retorno · ${number(result.waiting)} aviso(s) na fila.`;
+  toast(`${number(result.created)} processo(s) ligados à mesma planilha · ${number(result.queued)} atualização(ões) nova(s) após o último retorno · ${number(result.sentNow)} aviso(s) enviado(s) agora.`);
 });
 
 async function renderBlocked() {
