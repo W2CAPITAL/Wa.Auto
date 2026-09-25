@@ -45,6 +45,11 @@ jobs:
         run: npm ci --no-fund
       - name: Testar codigo no Windows
         run: npm run verify
+      - name: Testar INICIAR-WINDOWS.cmd de ponta a ponta
+        shell: cmd
+        env:
+          WA_STARTUP_TEST: '1'
+        run: INICIAR-WINDOWS.cmd
       - name: Montar pacote portatil
         shell: pwsh
         run: |
