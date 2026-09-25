@@ -67,7 +67,7 @@ export class Store {
     if (!entries.length) return;
     this.db.prepare(`UPDATE recipients SET ${entries.map(([key]) => `${key}=?`).join(',')},updated_at=? WHERE id=?`).run(...entries.map(([, value]) => value), iso(), id);
   }
-  nextEntry(campaignId) { return this.db.prepare("SELECT * FROM recipients WHERE campaign_id=? AND status='pending' ORDER BY id LIMIT 1").get(); }
+  nextEntry(campaignId) { return this.db.prepare("SELECT * FROM recipients WHERE campaign_id=? AND status='pending' ORDER BY id LIMIT 1").get(campaignId); }
   hasSentJid(campaignId, jid, entryId) { return !!this.db.prepare("SELECT id FROM recipients WHERE campaign_id=? AND jid=? AND id<>? AND status IN ('sending','sent','delivered','read','uncertain','failed_delivery') LIMIT 1").get(campaignId, jid, entryId); }
   getMeta(key) { return this.db.prepare('SELECT value FROM meta WHERE key=?').get(key)?.value; }
   setMeta(key, value) { this.db.prepare('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, String(value)); }

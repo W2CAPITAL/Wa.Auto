@@ -70,7 +70,9 @@ export class WhatsApp extends EventEmitter {
           this.emit('optout', { identities });
         }).catch(() => {});
       });
-      void client.initialize().catch(async error => {
+      void client.initialize().then(async () => {
+        if (!current()) await client.destroy().catch(() => {});
+      }).catch(async error => {
         if (!current()) { await client.destroy().catch(() => {}); return; }
         const browserMissing = /browser|chrome|chromium|executable|launch/i.test(error.message);
         this.update({ status: 'error', qr: null, account: null, message: browserMissing ? 'Não foi possível abrir o navegador. Instale o Chrome ou execute npm ci novamente. No Linux, confira as dependências do Chromium.' : 'Não foi possível conectar ao WhatsApp. Confira a internet e tente novamente.' });

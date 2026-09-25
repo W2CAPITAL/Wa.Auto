@@ -5,6 +5,7 @@ import { Store } from './store.js';
 import { WhatsApp } from './whatsapp.js';
 import { Queue } from './queue.js';
 import { createApp } from './app.js';
+import { spawn } from 'node:child_process';
 
 const projectDir = fileURLToPath(new URL('..', import.meta.url));
 const dataDir = path.resolve(process.env.WA_DATA_DIR || path.join(projectDir, 'data'));
@@ -29,7 +30,13 @@ const transport = new WhatsApp(dataDir);
 const queue = new Queue(store, transport);
 const app = createApp({ store, transport, queue });
 const port = Number(process.env.PORT || 3210);
-const server = app.listen(port, '127.0.0.1', () => console.log(`\nWA.Auto está pronto: http://127.0.0.1:${port}\nMantenha esta janela aberta durante os envios.\n`));
+const server = app.listen(port, '127.0.0.1', () => {
+  const url = `http://127.0.0.1:${port}`;
+  console.log(`\nWA.Auto está pronto: ${url}\nMantenha esta janela aberta durante os envios.\n`);
+  if (process.env.WA_OPEN_BROWSER === '1' && process.platform === 'win32') {
+    spawn('cmd.exe', ['/c', 'start', '', url], { stdio: 'ignore', windowsHide: true }).on('error', () => {});
+  }
+});
 server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `A porta ${port} já está em uso. Feche a outra instância ou altere PORT.` : error.message); process.exit(1); });
 let stopping = false;
 async function shutdown() {

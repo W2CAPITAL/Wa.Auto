@@ -76,7 +76,7 @@ export class Queue extends EventEmitter {
       const sent = await this.transport.send(jid, entry.message);
       requireValue(sent?.id, 'WhatsApp não retornou um identificador da mensagem.');
       const ack = sent.ack ?? 0;
-      this.store.updateEntry(entry.id, { status: ack >= 3 ? 'read' : ack === 2 ? 'delivered' : 'sent', message_id: sent.id, ack, reason: '' });
+      this.store.updateEntry(entry.id, { status: ack === -1 ? 'failed_delivery' : ack >= 3 ? 'read' : ack === 2 ? 'delivered' : 'sent', message_id: sent.id, ack, reason: ack === -1 ? 'O WhatsApp informou falha de entrega. Confira a conversa.' : '' });
     } catch (error) {
       const current = this.store.entry(entry.id);
       if (attempted) this.store.updateEntry(entry.id, { status: 'uncertain', reason: 'Envio sem confirmação. Confira a conversa antes de qualquer novo contato.' });

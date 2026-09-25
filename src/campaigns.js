@@ -15,7 +15,7 @@ export function prepareCampaign(store, input) {
   requireValue(input.selectedRows === undefined || (Array.isArray(input.selectedRows) && input.selectedRows.length <= 10000 && input.selectedRows.every(Number.isInteger)), 'Seleção de linhas inválida.');
   const selected = input.selectedRows === undefined ? null : new Set(input.selectedRows);
   const rows = sheet.rows.filter(row => !input.filterColumn || String(row.values[input.filterColumn]) === String(input.filterValue ?? ''));
-  const blockedPhones = new Set(rows.filter(row => blockedInRow(row.values)).map(row => normalizePhone(row.values[input.phoneColumn], country).phone).filter(Boolean));
+  const blockedPhones = new Set(sheet.rows.filter(row => blockedInRow(row.values)).map(row => normalizePhone(row.values[input.phoneColumn], country).phone).filter(Boolean));
   const seen = new Set();
   const entries = rows.map(row => {
     const rawPhone = String(row.values[input.phoneColumn] || '');
