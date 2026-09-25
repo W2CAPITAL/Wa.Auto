@@ -2,11 +2,13 @@ import { EventEmitter } from 'node:events';
 import { requireValue } from './errors.js';
 
 export class Queue extends EventEmitter {
-  constructor(store, transport, { now = () => Date.now(), autoTick = true } = {}) {
+  constructor(store, transport, { now = () => Date.now(), autoTick = true, resourceGuard = null, criticalIntent = null } = {}) {
     super();
     this.store = store;
     this.transport = transport;
     this.now = now;
+    this.resourceGuard = resourceGuard;
+    this.criticalIntent = criticalIntent;
     this.busy = false;
     this.closed = false;
     transport.on('state', state => {
@@ -23,6 +25,7 @@ export class Queue extends EventEmitter {
     requireValue(!this.closed, 'O aplicativo está encerrando.', 409);
     requireValue(this.transport.isReady(), 'Conecte seu WhatsApp antes de iniciar.', 409);
     requireValue(!this.busy, 'Aguarde o envio em andamento terminar.', 409);
+    requireValue(!this.resourceGuard || this.resourceGuard.canWork(), 'O servidor está sob pressão de memória. Aguarde alguns instantes e tente novamente.', 503);
     requireValue(!this.store.active() || this.store.active() === id, 'Já existe uma campanha em execução. Pause-a primeiro.', 409);
     const campaign = this.store.campaign(id);
     requireValue(['draft', 'paused', 'running'].includes(campaign.status), 'Esta campanha já foi encerrada.', 409);
@@ -48,6 +51,10 @@ export class Queue extends EventEmitter {
   }
   async tick() {
     if (this.busy || this.closed || !this.transport.isReady()) return;
+    if (this.resourceGuard && !this.resourceGuard.canWork()) {
+      this.pauseActive('Pausa automática de segurança: o servidor atingiu o limite de memória configurado.');
+      return;
+    }
     const id = this.store.active();
     if (!id) return;
     const entry = this.store.nextEntry(id);
@@ -69,9 +76,15 @@ export class Queue extends EventEmitter {
       if (!jid) { this.store.updateEntry(entry.id, { status: 'invalid', reason: 'Número não encontrado no WhatsApp' }); return; }
       if (this.store.isBlocked(jid, entry.phone)) { this.store.updateEntry(entry.id, { status: 'skipped', reason: 'Contato pediu para não receber mensagens', jid }); return; }
       if (this.store.hasSentJid(id, jid, entry.id)) { this.store.updateEntry(entry.id, { status: 'duplicate', reason: 'WhatsApp identificou o mesmo destinatário de outra linha', jid }); return; }
-      // Persist the intent before any external side effect. Recovery never auto-retries this state.
+      // Register a tiny durable journal before the external side effect. If Render
+      // restarts in the critical window, recovery marks the line as uncertain instead
+      // of risking a duplicate WhatsApp message.
+      if (this.criticalIntent) {
+        await this.criticalIntent.begin('campaign', { campaignId:id, entryId:entry.id, phone:entry.phone, jid });
+      }
       this.store.updateEntry(entry.id, { status: 'sending', jid });
       attempted = true;
+      this.criticalIntent?.arm();
       this.emit('change');
       const sent = await this.transport.send(jid, entry.message);
       requireValue(sent?.id, 'WhatsApp não retornou um identificador da mensagem.');
