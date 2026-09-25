@@ -7,123 +7,220 @@ import { requireValue } from './errors.js';
 
 const timeout = (promise, milliseconds) => {
   let timer;
-  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('O WhatsApp demorou demais para responder.')), milliseconds); })]).finally(() => clearTimeout(timer));
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('O WhatsApp demorou demais para responder.')), milliseconds); }),
+  ]).finally(() => clearTimeout(timer));
 };
+
+const phoneFromJid = jid => String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+const normalizeJid = jid => String(jid || '').replace(/:\d+@/, '@');
+function messageText(message) {
+  let content = message?.message || {};
+  if (content.ephemeralMessage?.message) content = content.ephemeralMessage.message;
+  if (content.viewOnceMessage?.message) content = content.viewOnceMessage.message;
+  return String(
+    content.conversation ||
+    content.extendedTextMessage?.text ||
+    content.imageMessage?.caption ||
+    content.videoMessage?.caption ||
+    ''
+  );
+}
+
 export class WhatsApp extends EventEmitter {
-  constructor(dataDir, { packageLoader = () => import('whatsapp-web.js'), qrEncoder = (code, options) => QRCode.toDataURL(code, options) } = {}) {
+  constructor(dataDir, {
+    packageLoader = () => import('@whiskeysockets/baileys'),
+    qrEncoder = (code, options) => QRCode.toDataURL(code, options),
+    onPersistentChange = () => {},
+  } = {}) {
     super();
     this.dataDir = dataDir;
     this.packageLoader = packageLoader;
     this.qrEncoder = qrEncoder;
+    this.onPersistentChange = onPersistentChange;
     this.state = { status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'Conecte seu WhatsApp para começar.' };
     this.generation = 0;
     this.connecting = false;
+    this.manualClose = false;
+    this.reconnectTimer = null;
   }
+
   snapshot() { return this.state; }
   isReady() { return this.state.status === 'ready'; }
   update(state) { this.state = { ...this.state, ...state }; this.emit('state', this.state); }
+  persistSoon() { try { this.onPersistentChange(); } catch {} }
+
   async connect({ phoneNumber = null } = {}) {
-    if (this.connecting || ['connecting', 'qr', 'authenticated', 'ready'].includes(this.state.status)) return;
+    if (this.connecting || ['connecting', 'qr', 'pairing', 'authenticated', 'ready'].includes(this.state.status)) return;
+    this.manualClose = false;
     this.connecting = true;
+    clearTimeout(this.reconnectTimer);
     try {
-      await this.close();
       const generation = ++this.generation;
       const module = await this.packageLoader();
-      const pkg = module?.default || module;
-      const { Client, LocalAuth } = pkg;
-      requireValue(Client && LocalAuth, 'A integração do WhatsApp não carregou corretamente.');
-      const chromeCandidates = [process.env.CHROME_PATH, process.env.PUPPETEER_EXECUTABLE_PATH];
-      if (process.platform === 'win32') {
-        for (const root of [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean)) {
-          chromeCandidates.push(path.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
-        }
-      }
-      const executablePath = chromeCandidates.find(candidate => candidate && fs.existsSync(candidate));
-      const client = new Client({
-        authStrategy: new LocalAuth({ clientId: 'wa-auto', dataPath: path.join(this.dataDir, 'session') }),
-        pairWithPhoneNumber: phoneNumber ? { phoneNumber, showNotification: true, intervalMs: 180000 } : {},
-        webVersionCache: { type: 'local', path: path.join(this.dataDir, 'web-cache') },
-        deviceName: 'WA.Auto',
-        authTimeoutMs: 120000,
-        qrMaxRetries: 8,
-        puppeteer: { headless: true, ...(executablePath ? { executablePath } : {}), args: ['--disable-dev-shm-usage'] },
+      const makeWASocket = module.default || module.makeWASocket;
+      const { useMultiFileAuthState, Browsers = {}, DisconnectReason = {} } = module;
+      requireValue(makeWASocket && useMultiFileAuthState, 'A integração cloud do WhatsApp não carregou corretamente.');
+
+      const authDir = path.join(this.dataDir, 'baileys-auth');
+      fs.mkdirSync(authDir, { recursive: true });
+      const { state, saveCreds } = await useMultiFileAuthState(authDir);
+      const client = makeWASocket({
+        auth: state,
+        browser: Browsers.ubuntu ? Browsers.ubuntu('WA.Auto') : ['WA.Auto', 'Chrome', '1.0.0'],
+        markOnlineOnConnect: false,
+        syncFullHistory: false,
+        generateHighQualityLinkPreview: false,
+        shouldIgnoreJid: jid => String(jid || '').endsWith('@g.us'),
       });
       this.client = client;
+      this.disconnectReason = DisconnectReason;
       const current = () => this.client === client && generation === this.generation;
-      this.update({ status: 'connecting', qr: null, pairingCode: null, account: null, message: phoneNumber ? 'Gerando código de pareamento…' : 'Abrindo a conexão com o WhatsApp…' });
-      client.on('code', code => {
-        if (current()) this.update({ status: 'pairing', qr: null, pairingCode: code, message: 'No WhatsApp, abra Aparelhos conectados → Conectar aparelho → Conectar com número de telefone e informe este código.' });
+
+      this.update({
+        status: 'connecting',
+        qr: null,
+        pairingCode: null,
+        account: null,
+        message: phoneNumber ? 'Gerando código de pareamento…' : 'Conectando ao WhatsApp…',
       });
-      client.on('qr', code => {
-        void this.qrEncoder(code, { margin: 2, width: 280 }).then(qr => {
-          if (current() && !['authenticated', 'ready'].includes(this.state.status)) this.update({ status: 'qr', qr, pairingCode: null, message: 'Escaneie com WhatsApp → Aparelhos conectados → Conectar aparelho.' });
-        }).catch(() => {
-          if (current() && !['authenticated', 'ready'].includes(this.state.status)) this.update({ status: 'error', qr: null, message: 'Não foi possível gerar o QR Code. Tente conectar novamente.' });
+
+      client.ev.on('creds.update', async () => {
+        if (!current()) return;
+        await saveCreds();
+        this.persistSoon();
+      });
+
+      client.ev.on('connection.update', update => {
+        if (!current()) return;
+        if (update.qr) {
+          void this.qrEncoder(update.qr, { margin: 2, width: 280 }).then(qr => {
+            if (current() && !['authenticated', 'ready'].includes(this.state.status)) {
+              this.update({ status: 'qr', qr, pairingCode: null, message: 'Escaneie com WhatsApp → Aparelhos conectados → Conectar aparelho.' });
+            }
+          }).catch(() => {
+            if (current()) this.update({ status: 'error', qr: null, message: 'Não foi possível gerar o QR Code. Tente novamente.' });
+          });
+        }
+
+        if (update.connection === 'open') {
+          const jid = client.user?.id || '';
+          this.update({
+            status: 'ready',
+            qr: null,
+            pairingCode: null,
+            account: { name: client.user?.name || 'WhatsApp', phone: phoneFromJid(jid) },
+            message: 'WhatsApp conectado na nuvem. Você já pode iniciar uma campanha.',
+          });
+          this.persistSoon();
+        }
+
+        if (update.connection === 'close') {
+          const statusCode = update.lastDisconnect?.error?.output?.statusCode || update.lastDisconnect?.error?.statusCode || update.lastDisconnect?.error?.data?.statusCode;
+          const loggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
+          this.client = null;
+          if (loggedOut) {
+            this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'A sessão foi desconectada pelo WhatsApp. Gere um novo QR Code.' });
+            this.persistSoon();
+          } else {
+            this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão caiu. A fila foi pausada e a reconexão será tentada automaticamente.' });
+            if (!this.manualClose) {
+              clearTimeout(this.reconnectTimer);
+              this.reconnectTimer = setTimeout(() => void this.connect().catch(() => {}), 2500);
+              this.reconnectTimer.unref?.();
+            }
+          }
+        }
+      });
+
+      client.ev.on('messages.update', updates => {
+        if (!current()) return;
+        for (const item of updates || []) {
+          const status = Number(item?.update?.status);
+          const id = item?.key?.id;
+          if (!id || !Number.isFinite(status)) continue;
+          const ack = status <= 0 ? -1 : status >= 4 ? 3 : status === 3 ? 2 : status >= 2 ? 1 : 0;
+          if (ack) this.emit('ack', { id, ack });
+        }
+        this.persistSoon();
+      });
+
+      client.ev.on('messages.upsert', ({ messages }) => {
+        if (!current()) return;
+        for (const message of messages || []) {
+          if (message?.key?.fromMe) continue;
+          const from = normalizeJid(message?.key?.remoteJid);
+          if (!/(@s\.whatsapp\.net|@lid)$/.test(from)) continue;
+          const body = fold(messageText(message)).replace(/[.!?]+$/, '').trim();
+          if (!/^(sair|parar|cancelar|stop|remover|descadastrar|nao quero receber( mensagens)?|nao me envie( mais)? mensagens)$/.test(body)) continue;
+          const phone = phoneFromJid(from);
+          this.emit('optout', { identities: [from, phone].filter(Boolean) });
+        }
+        this.persistSoon();
+      });
+
+      if (phoneNumber && !state.creds?.registered) {
+        const digits = String(phoneNumber).replace(/\D/g, '');
+        const code = await timeout(client.requestPairingCode(digits), 30000);
+        if (current()) this.update({
+          status: 'pairing',
+          qr: null,
+          pairingCode: code,
+          message: 'No WhatsApp, abra Aparelhos conectados → Conectar aparelho → Conectar com número de telefone e informe este código.',
         });
-      });
-      client.on('authenticated', () => { if (current()) this.update({ status: 'authenticated', qr: null, pairingCode: null, message: 'Conta vinculada. Carregando suas conversas…' }); });
-      client.on('ready', () => {
-        if (current()) this.update({ status: 'ready', qr: null, pairingCode: null, account: { name: client.info?.pushname || 'WhatsApp', phone: client.info?.wid?.user || '' }, message: 'WhatsApp conectado. Você já pode iniciar uma campanha.' });
-      });
-      client.on('auth_failure', () => { if (current()) this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'Sessão expirada. Clique em Esquecer sessão e conecte novamente.' }); });
-      client.on('disconnected', () => { if (current()) this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão caiu. A fila foi pausada; conecte novamente para continuar.' }); });
-      client.on('message_ack', (message, ack) => { if (current()) this.emit('ack', { id: message.id?._serialized, ack }); });
-      client.on('message', message => {
-        if (!current() || message.fromMe || !/(@c\.us|@lid)$/.test(message.from || '')) return;
-        const body = fold(message.body).replace(/[.!?]+$/, '').trim();
-        if (!/^(sair|parar|cancelar|stop|remover|descadastrar|nao quero receber( mensagens)?|nao me envie( mais)? mensagens)$/.test(body)) return;
-        // Block the observed identity immediately, before any asynchronous lookup.
-        this.emit('optout', { identities: [message.from, ...(message.from.endsWith('@c.us') ? [message.from.split('@')[0]] : [])] });
-        void timeout(client.getContactLidAndPhone([message.from]), 15000).then(contacts => {
-          if (!current()) return;
-          const identities = contacts.flatMap(contact => [contact.lid, contact.pn, contact.pn?.split('@')[0]]).filter(Boolean);
-          this.emit('optout', { identities });
-        }).catch(() => {});
-      });
-      void client.initialize().then(async () => {
-        if (!current()) await client.destroy().catch(() => {});
-      }).catch(async error => {
-        if (!current()) { await client.destroy().catch(() => {}); return; }
-        const browserMissing = /browser|chrome|chromium|executable|launch/i.test(error.message);
-        this.update({ status: 'error', qr: null, account: null, message: browserMissing ? 'Não foi possível abrir o navegador. Instale o Chrome ou execute npm ci novamente. No Linux, confira as dependências do Chromium.' : 'Não foi possível conectar ao WhatsApp. Confira a internet e tente novamente.' });
-        await client.destroy().catch(() => {});
-      });
+      }
     } catch (error) {
-      this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'Falha ao iniciar. Confira a instalação e tente novamente.' });
+      this.client = null;
+      this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'Falha ao iniciar a conexão cloud do WhatsApp. Tente novamente.' });
       throw error;
-    } finally { this.connecting = false; }
+    } finally {
+      this.connecting = false;
+    }
   }
+
   async resolve(phone) {
     requireValue(this.isReady(), 'WhatsApp desconectado.', 409);
-    const result = await timeout(this.client.getNumberId(phone), 30000);
-    return result?._serialized || null;
+    const rows = await timeout(this.client.onWhatsApp(String(phone)), 30000);
+    const found = Array.isArray(rows) ? rows.find(row => row?.exists !== false && row?.jid) : null;
+    return found?.jid ? normalizeJid(found.jid) : null;
   }
+
   async send(jid, text) {
     requireValue(this.isReady(), 'WhatsApp desconectado.', 409);
     const client = this.client;
     try {
-      const result = await timeout(client.sendMessage(jid, text, { sendSeen: false }), 60000);
-      return { id: result?.id?._serialized, ack: result?.ack ?? 0 };
+      const result = await timeout(client.sendMessage(jid, { text }), 60000);
+      this.persistSoon();
+      return { id: result?.key?.id || result?.id, ack: 0 };
     } catch (error) {
-      // A timed-out operation may already have sent. Terminate this session before another send.
       await this.close();
       throw error;
     }
   }
+
   async logout() {
-    if (this.client && this.isReady()) await timeout(this.client.logout(), 15000).catch(() => {});
-    await this.close();
-    await fs.promises.rm(path.join(this.dataDir, 'session'), { recursive: true, force: true });
+    clearTimeout(this.reconnectTimer);
+    this.manualClose = true;
+    const client = this.client;
+    this.client = null;
+    if (client?.logout) await timeout(client.logout(), 15000).catch(() => {});
+    ++this.generation;
+    await fs.promises.rm(path.join(this.dataDir, 'baileys-auth'), { recursive: true, force: true });
+    this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'Sessão removida. Gere um novo QR Code.' });
+    this.persistSoon();
   }
+
   async close() {
+    clearTimeout(this.reconnectTimer);
+    this.manualClose = true;
     ++this.generation;
     const client = this.client;
     this.client = null;
     this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'Conecte seu WhatsApp para começar.' });
     if (client) {
-      const browser = client.pupBrowser;
-      try { await timeout(client.destroy(), 10000); }
-      catch { browser?.process()?.kill(); }
+      try { client.end?.(new Error('WA.Auto desconectado')); } catch {}
+      try { client.ws?.close?.(); } catch {}
     }
   }
 }
