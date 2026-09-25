@@ -74,14 +74,14 @@ test('monitor cria linha de base sem disparar histórico e envia apenas novidade
   fetchImpl.next();
   const second=await service.scanOne(store.legalMonitor(monitor.id));
   assert.equal(second.newEvents,2);
-  assert.equal(transport.sent.length,2);
+  assert.equal(transport.sent.length,1,'novidades do mesmo processo devem sair em um único aviso');
   assert.match(transport.sent[0].message,/ATUALIZAÇÃO PROCESSUAL/);
   assert.match(transport.sent[0].message,/Ana Cliente/);
   assert.equal(store.legalStats().sent,2);
 
   const third=await service.scanOne(store.legalMonitor(monitor.id));
   assert.equal(third.newEvents,0);
-  assert.equal(transport.sent.length,2,'não deve reenviar o mesmo evento');
+  assert.equal(transport.sent.length,1,'não deve reenviar o mesmo evento');
 
   service.stop();
   store.close();
