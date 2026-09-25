@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "destination": "https://wa-auto-cloud.onrender.com/$1",
+      "permanent": false
+    }
+  ]
+}
