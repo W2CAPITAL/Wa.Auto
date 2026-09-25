@@ -4,7 +4,7 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': 
 const labels = { draft: 'Rascunho', running: 'Em andamento', paused: 'Pausada', completed: 'Concluída', cancelled: 'Cancelada', valid: 'Válido', pending: 'Pronta para enviar', resolving: 'Conferindo número', sending: 'Enviando', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', uncertain: 'Conferir no WhatsApp', invalid: 'Revisar dados', duplicate: 'Repetido', skipped: 'Não contatar', excluded: 'Não selecionado', failed_delivery: 'Falha de entrega' };
 const badge = status => `<span class="badge ${escape(status)}">${escape(labels[status] || status)}</span>`;
 const number = value => Number(value || 0).toLocaleString('pt-BR');
-const state = { token: '', imported: null, contacts: null, contactPage: 0, contactLoadSeq: 0, connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
+const state = { token: '', imported: null, contacts: null, contactPage: 0, contactFilter: 'all', contactSelection: new Set(), contactLoadSeq: 0, searchQuery: '', connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
 const PAGE_SIZE = 25;
 let toastTimer;
 
@@ -119,27 +119,71 @@ async function loadContacts() {
   if (seq !== state.contactLoadSeq) return;
   state.contacts = result;
   state.contactPage = 0;
+  state.contactSelection = new Set(result.entries.filter(row => row.status === 'valid').map(row => row.row));
   renderImportedContacts();
+}
+
+function filteredContacts() {
+  if (!state.contacts) return [];
+  const query = state.searchQuery.trim().toLowerCase();
+  return state.contacts.entries.filter(row => {
+    if (state.contactFilter === 'valid' && row.status !== 'valid') return false;
+    if (state.contactFilter === 'issues' && row.status === 'valid') return false;
+    if (!query) return true;
+    return [row.name, row.phone, row.rawPhone, row.status, row.reason].some(value => String(value || '').toLowerCase().includes(query));
+  });
 }
 
 function renderImportedContacts() {
   if (!state.contacts) {
     $('import-contacts').classList.add('hidden');
+    $('stat-valid').textContent = '0';
+    $('stat-duplicates').textContent = '0';
+    $('stat-problems').textContent = '0';
     return;
   }
   const { entries, counts } = state.contacts;
+  if (!state.contactSelection.size) state.contactSelection = new Set(entries.filter(row => row.status === 'valid').map(row => row.row));
   $('import-contacts').classList.remove('hidden');
   $('import-contact-summary').textContent = `${number(counts.valid)} contato(s) válido(s) para envio`;
-  const unusable = (counts.invalid || 0) + (counts.skipped || 0) + (counts.duplicate || 0);
   $('import-contact-details').textContent = `${number(counts.total)} linhas · ${number(counts.filled)} telefone(s) preenchido(s) · ${number(counts.duplicate || 0)} repetido(s) · ${number(counts.skipped || 0)} não contatar · ${number(counts.invalid || 0)} vazio(s)/inválido(s)`;
-  $('send-all-valid').textContent = `Enviar para todos os ${number(counts.valid)} válidos →`;
+  $('send-all-valid').innerHTML = `<span>✈</span> Enviar para todos os ${number(counts.valid)} válidos <span>⌄</span>`;
+  $('stat-valid').textContent = number(counts.valid);
+  $('stat-duplicates').textContent = number(counts.duplicate || 0);
+  $('stat-problems').textContent = number((counts.invalid || 0) + (counts.skipped || 0));
+  $('contact-count-all').textContent = `(${number(counts.total)})`;
+  $('contact-count-valid').textContent = `(${number(counts.valid)})`;
+  $('contact-count-issues').textContent = `(${number((counts.invalid || 0) + (counts.skipped || 0) + (counts.duplicate || 0))})`;
+  $('plan-usage').textContent = `${number(counts.valid)} de 5.000 contatos`;
+  $('plan-progress-fill').style.width = `${Math.min(100, Math.round((counts.valid / 5000) * 100))}%`;
 
+  const visible = filteredContacts();
+  const maxPage = Math.max(0, Math.ceil(visible.length / PAGE_SIZE) - 1);
+  if (state.contactPage > maxPage) state.contactPage = maxPage;
   const offset = state.contactPage * PAGE_SIZE;
-  const rows = entries.slice(offset, offset + PAGE_SIZE);
-  $('import-contact-rows').innerHTML = rows.map(row => `<tr><td>${row.row}</td><td>${escape(row.name)}</td><td>${escape(row.phone ? `+${row.phone}` : row.rawPhone || '—')}</td><td>${badge(row.status)}${row.reason ? `<div class="row-reason">${escape(row.reason)}</div>` : ''}</td></tr>`).join('');
-  $('import-contact-page-label').textContent = `${number(entries.length ? offset + 1 : 0)}–${number(Math.min(offset + PAGE_SIZE, entries.length))} de ${number(entries.length)}`;
+  const rows = visible.slice(offset, offset + PAGE_SIZE);
+  $('import-contact-rows').innerHTML = rows.map(row => `<tr>
+    <td class="check-col"><input type="checkbox" data-contact-select="${row.row}" ${state.contactSelection.has(row.row) ? 'checked' : ''} ${row.status === 'valid' ? '' : 'disabled'}></td>
+    <td><strong>${escape(row.name)}</strong></td>
+    <td>${escape(row.phone ? `+${row.phone}` : row.rawPhone || '—')}</td>
+    <td>${badge(row.status)}${row.reason ? `<div class="row-reason">${escape(row.reason)}</div>` : ''}</td>
+    <td><button class="contact-more" data-contact-more="${row.row}" aria-label="Detalhes">•••</button></td>
+  </tr>`).join('');
+  for (const checkbox of $('import-contact-rows').querySelectorAll('[data-contact-select]')) checkbox.addEventListener('change', () => {
+    const row = Number(checkbox.dataset.contactSelect);
+    if (checkbox.checked) state.contactSelection.add(row); else state.contactSelection.delete(row);
+    renderImportedContacts();
+  });
+  for (const button of $('import-contact-rows').querySelectorAll('[data-contact-more]')) button.addEventListener('click', () => {
+    const row = entries.find(item => item.row === Number(button.dataset.contactMore));
+    toast(`${row.name} · ${row.phone ? '+' + row.phone : row.rawPhone || 'sem telefone'} · ${labels[row.status] || row.status}`);
+  });
+  const validVisible = visible.filter(row => row.status === 'valid');
+  $('contacts-select-all').checked = validVisible.length > 0 && validVisible.every(row => state.contactSelection.has(row.row));
+  $('contacts-select-all').indeterminate = validVisible.some(row => state.contactSelection.has(row.row)) && !$('contacts-select-all').checked;
+  $('import-contact-page-label').textContent = `${number(visible.length ? offset + 1 : 0)}–${number(Math.min(offset + PAGE_SIZE, visible.length))} de ${number(visible.length)}`;
   $('import-contact-prev').disabled = state.contactPage === 0;
-  $('import-contact-next').disabled = offset + PAGE_SIZE >= entries.length;
+  $('import-contact-next').disabled = offset + PAGE_SIZE >= visible.length;
   refreshControls();
 }
 
@@ -164,6 +208,23 @@ for (const id of ['phone-column', 'name-column', 'country']) $(id).addEventListe
 });
 $('import-contact-prev').addEventListener('click', () => { state.contactPage = Math.max(0, state.contactPage - 1); renderImportedContacts(); });
 $('import-contact-next').addEventListener('click', () => { state.contactPage++; renderImportedContacts(); });
+for (const [id, filter] of [['contact-tab-all','all'],['contact-tab-valid','valid'],['contact-tab-issues','issues']]) $(id).addEventListener('click', () => {
+  state.contactFilter = filter;
+  state.contactPage = 0;
+  for (const tab of document.querySelectorAll('.contact-tab')) tab.classList.toggle('active', tab.id === id);
+  renderImportedContacts();
+});
+$('contacts-select-all').addEventListener('change', () => {
+  for (const row of filteredContacts().filter(row => row.status === 'valid')) {
+    if ($('contacts-select-all').checked) state.contactSelection.add(row.row); else state.contactSelection.delete(row.row);
+  }
+  renderImportedContacts();
+});
+$('advanced-toggle').addEventListener('click', () => {
+  $('advanced-fields').classList.toggle('hidden');
+  $('advanced-toggle').classList.toggle('active');
+});
+$('variables-toggle').addEventListener('click', () => $('variables').classList.toggle('collapsed'));
 for (const id of ['campaign-name', 'interval']) $(id).addEventListener('input', saveDraft);
 
 function firstSelected() { return state.preview?.entries.find(row => row.status === 'pending' && state.selected.has(row.row)); }
@@ -245,7 +306,9 @@ onClick('save-campaign', async () => {
 });
 onClick('new-campaign', () => {
   $('campaign-name').value = ''; $('template').value = ''; state.saved = false; invalidate();
-  $('campaign-name').focus(); $('campaign-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  showPage('campaigns', document.querySelector('[data-page="campaigns"]'));
+  $('composer-section').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => $('campaign-name').focus(), 350);
 });
 
 function renderConnection() {
@@ -264,9 +327,26 @@ function renderConnection() {
   if ($('connection-content').innerHTML !== markup) $('connection-content').innerHTML = markup;
   $('connect-action').textContent = ready || waiting ? 'Desconectar' : 'Gerar QR Code';
   $('pair-action').textContent = current.status === 'pairing' ? 'Gerar outro código' : 'Gerar código de pareamento';
+  const displayName = ready ? (current.account?.name || 'WhatsApp') : 'WA.Auto';
+  $('account-name').textContent = displayName;
+  $('account-subtitle').textContent = ready && current.account?.phone ? `+${current.account.phone}` : 'Minha conta';
+  $('account-avatar').textContent = displayName.trim().slice(0,2).toUpperCase();
   refreshControls();
 }
 $('connection-open').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
+function showConnectionTab(tab) {
+  const qr = tab === 'qr';
+  $('connection-tab-qr').classList.toggle('active', qr);
+  $('connection-tab-phone').classList.toggle('active', !qr);
+  $('connection-qr-panel').classList.toggle('hidden', !qr);
+  $('connection-phone-panel').classList.toggle('hidden', qr);
+  $('connect-action').classList.toggle('hidden', !qr);
+}
+$('connection-tab-qr').addEventListener('click', () => showConnectionTab('qr'));
+$('connection-tab-phone').addEventListener('click', () => showConnectionTab('phone'));
+$('switch-to-phone').addEventListener('click', () => showConnectionTab('phone'));
+$('switch-to-qr').addEventListener('click', () => showConnectionTab('qr'));
+showConnectionTab('qr');
 onClick('connect-action', async () => {
   const connected = ['ready', 'connecting', 'qr', 'pairing', 'authenticated'].includes(state.connection.status);
   state.connection = await api(`/api/whatsapp/${connected ? 'disconnect' : 'connect'}`, { method: 'POST' }); renderConnection();
@@ -286,10 +366,11 @@ function renderHistory() {
   const list = state.campaigns;
   const sum = statuses => list.reduce((count, campaign) => count + statuses.reduce((s, status) => s + (campaign.counts[status] || 0), 0), 0);
   $('stat-campaigns').textContent = number(list.length);
-  $('stat-sent').textContent = number(sum(['sent', 'delivered', 'read']));
-  $('stat-delivered').textContent = number(sum(['delivered', 'read']));
-  $('stat-pending').textContent = number(sum(['pending', 'resolving', 'sending']));
-  const markup = list.length ? list.map(campaign => {
+  const attention = sum(['pending', 'resolving', 'sending']) + list.filter(campaign => campaign.status === 'running').length;
+  $('notification-dot').style.display = attention > 0 ? '' : 'none';
+  const query = state.searchQuery.trim().toLowerCase();
+  const filteredList = query ? list.filter(campaign => campaign.name.toLowerCase().includes(query)) : list;
+  const markup = filteredList.length ? filteredList.map(campaign => {
     const done = ['sent', 'delivered', 'read'].reduce((n, key) => n + (campaign.counts[key] || 0), 0);
     const pending = ['pending', 'resolving', 'sending'].reduce((n, key) => n + (campaign.counts[key] || 0), 0);
     const date = new Date(campaign.created_at).toLocaleDateString('pt-BR');
@@ -391,11 +472,31 @@ async function renderBlocked() {
   }));
 }
 $('block-form').addEventListener('submit', event => { event.preventDefault(); void perform(event.submitter, async () => { await api('/api/suppressions', { method: 'POST', body: { phone: $('block-phone').value, reason: $('block-reason').value } }); $('block-phone').value = ''; $('block-reason').value = ''; await renderBlocked(); toast('Telefone adicionado à lista.'); }); });
-for (const button of document.querySelectorAll('[data-page]')) button.addEventListener('click', () => {
-  for (const page of document.querySelectorAll('main>.page')) page.classList.toggle('hidden', page.id !== `page-${button.dataset.page}`);
-  for (const nav of document.querySelectorAll('[data-page]')) nav.classList.toggle('active', nav === button);
-  $('page-title').textContent = { campaigns: 'Campanhas', blocked: 'Não contatar', help: 'Como usar' }[button.dataset.page];
-  if (button.dataset.page === 'blocked') void perform(null, renderBlocked);
+function showPage(page, activeButton = null) {
+  for (const section of document.querySelectorAll('main>.page')) section.classList.toggle('hidden', section.id !== `page-${page}`);
+  for (const nav of document.querySelectorAll('.sidebar-nav .nav-item')) nav.classList.toggle('active', nav === activeButton);
+  if (page === 'blocked') void perform(null, renderBlocked);
+}
+for (const button of document.querySelectorAll('[data-page]')) button.addEventListener('click', () => showPage(button.dataset.page, button.closest('.sidebar-nav') ? button : null));
+$('nav-whatsapp').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
+$('nav-clients').addEventListener('click', () => { showPage('campaigns', $('nav-clients')); $('clients-section').scrollIntoView({ behavior:'smooth', block:'start' }); });
+$('nav-history').addEventListener('click', () => { showPage('campaigns', $('nav-history')); $('history-section').scrollIntoView({ behavior:'smooth', block:'start' }); });
+$('top-help').addEventListener('click', () => showPage('help'));
+$('account-button').addEventListener('click', () => showPage('blocked'));
+$('plan-button').addEventListener('click', () => { showPage('help'); toast('WA.Auto Cloud é gratuito. Os limites exibidos servem apenas para organizar o uso.'); });
+$('notifications-button').addEventListener('click', () => {
+  const active = state.campaigns.filter(campaign => ['running','paused','draft'].includes(campaign.status));
+  if (!active.length) toast('Nenhuma campanha precisa de atenção agora.');
+  else { showPage('campaigns', $('nav-history')); $('history-section').scrollIntoView({ behavior:'smooth', block:'start' }); toast(`${active.length} campanha(s) no histórico para acompanhar.`); }
+});
+$('global-search').addEventListener('input', event => {
+  state.searchQuery = event.target.value;
+  state.contactPage = 0;
+  renderImportedContacts();
+  renderHistory();
+});
+window.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('global-search').focus(); }
 });
 
 let polling = false;
