@@ -24,7 +24,7 @@ export function prepareCampaign(store, input) {
     let reason = '';
     let status = 'pending';
     if (error) { status = 'invalid'; reason = error; }
-    else if (blockedInRow(row.values) || blockedPhones.has(phone) || store.isBlocked(phone, `${phone}@c.us`)) { status = 'skipped'; reason = 'Não contatar: indicação na planilha ou lista de bloqueio'; }
+    else if (blockedInRow(row.values) || blockedPhones.has(phone) || store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { status = 'skipped'; reason = 'Não contatar: indicação na planilha ou lista de bloqueio'; }
     else if (input.consentColumn && !affirmative(row.values[input.consentColumn])) { status = 'skipped'; reason = 'Sem autorização na coluna escolhida'; }
     else if (selected && !selected.has(row.id)) { status = 'excluded'; reason = 'Removido da seleção'; }
     else if (missing.length) { status = 'invalid'; reason = `Dados ausentes: ${missing.join(', ')}`; }
