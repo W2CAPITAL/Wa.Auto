@@ -17,6 +17,41 @@ export class Store {
       CREATE INDEX IF NOT EXISTS recipients_queue ON recipients(campaign_id,status,id);
       CREATE INDEX IF NOT EXISTS recipients_message ON recipients(message_id);
       CREATE TABLE IF NOT EXISTS suppressions(identity TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS legal_monitors(
+        id TEXT PRIMARY KEY,
+        cnj TEXT NOT NULL,
+        client_name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        tribunal_alias TEXT NOT NULL DEFAULT '',
+        mode TEXT NOT NULL DEFAULT 'both',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        notify_whatsapp INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_checked_at TEXT,
+        last_event_at TEXT,
+        last_event_hash TEXT,
+        last_event_source TEXT,
+        last_event_text TEXT,
+        error TEXT NOT NULL DEFAULT ''
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS legal_monitor_unique ON legal_monitors(cnj,phone);
+      CREATE TABLE IF NOT EXISTS legal_events(
+        id TEXT PRIMARY KEY,
+        monitor_id TEXT NOT NULL REFERENCES legal_monitors(id) ON DELETE CASCADE,
+        event_hash TEXT NOT NULL,
+        source TEXT NOT NULL,
+        title TEXT NOT NULL,
+        details TEXT NOT NULL DEFAULT '',
+        event_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        send_status TEXT NOT NULL DEFAULT 'waiting',
+        message_id TEXT,
+        sent_at TEXT,
+        error TEXT NOT NULL DEFAULT ''
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS legal_event_unique ON legal_events(monitor_id,event_hash);
+      CREATE INDEX IF NOT EXISTS legal_events_pending ON legal_events(send_status,event_at);
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
     this.db.prepare("UPDATE campaigns SET status='paused',reason='Aplicativo reiniciado. Confira o histórico antes de continuar.' WHERE status='running'").run();
     this.db.prepare("UPDATE recipients SET status='uncertain',reason='O aplicativo fechou durante o envio. Confira a conversa; não haverá reenvio automático.' WHERE status='sending'").run();
@@ -79,6 +114,71 @@ export class Store {
   }
   suppressions() { return this.db.prepare('SELECT * FROM suppressions ORDER BY created_at DESC').all(); }
   removeSuppression(identity) { this.db.prepare('DELETE FROM suppressions WHERE identity=?').run(identity); }
+
+  createLegalMonitor({ cnj, clientName, phone, tribunalAlias = '', mode = 'both', notifyWhatsapp = true }) {
+    const now = iso();
+    const existing = this.db.prepare('SELECT id FROM legal_monitors WHERE cnj=? AND phone=?').get(cnj, phone);
+    const id = existing?.id || randomUUID();
+    this.db.prepare(`INSERT INTO legal_monitors(
+      id,cnj,client_name,phone,tribunal_alias,mode,enabled,notify_whatsapp,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,1,?,?,?)
+    ON CONFLICT(cnj,phone) DO UPDATE SET
+      client_name=excluded.client_name,
+      tribunal_alias=excluded.tribunal_alias,
+      mode=excluded.mode,
+      notify_whatsapp=excluded.notify_whatsapp,
+      enabled=1,
+      updated_at=excluded.updated_at`).run(id, cnj, clientName, phone, tribunalAlias, mode, notifyWhatsapp ? 1 : 0, now, now);
+    return this.legalMonitor(id);
+  }
+  legalMonitor(id) {
+    const row = this.db.prepare('SELECT * FROM legal_monitors WHERE id=?').get(id);
+    requireValue(row, 'Monitor processual não encontrado.', 404);
+    return { ...row, enabled: !!row.enabled, notify_whatsapp: !!row.notify_whatsapp };
+  }
+  legalMonitors() {
+    return this.db.prepare('SELECT * FROM legal_monitors ORDER BY created_at DESC').all().map(row => ({ ...row, enabled: !!row.enabled, notify_whatsapp: !!row.notify_whatsapp }));
+  }
+  updateLegalMonitor(id, values = {}) {
+    const allowed = new Set(['client_name','phone','tribunal_alias','mode','enabled','notify_whatsapp','last_checked_at','last_event_at','last_event_hash','last_event_source','last_event_text','error']);
+    const entries = Object.entries(values).filter(([key]) => allowed.has(key));
+    if (!entries.length) return this.legalMonitor(id);
+    const normalized = entries.map(([key, value]) => [key, ['enabled','notify_whatsapp'].includes(key) ? (value ? 1 : 0) : value]);
+    this.db.prepare(`UPDATE legal_monitors SET ${normalized.map(([key]) => `${key}=?`).join(',')},updated_at=? WHERE id=?`).run(...normalized.map(([,value]) => value), iso(), id);
+    return this.legalMonitor(id);
+  }
+  deleteLegalMonitor(id) { this.db.prepare('DELETE FROM legal_monitors WHERE id=?').run(id); }
+  hasLegalEvent(monitorId, eventHash) { return !!this.db.prepare('SELECT id FROM legal_events WHERE monitor_id=? AND event_hash=?').get(monitorId, eventHash); }
+  recordLegalEvent({ monitorId, eventHash, source, title, details = '', eventAt, sendStatus = 'waiting' }) {
+    const id = randomUUID();
+    this.db.prepare(`INSERT OR IGNORE INTO legal_events(id,monitor_id,event_hash,source,title,details,event_at,created_at,send_status)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(id, monitorId, eventHash, source, title, details, eventAt, iso(), sendStatus);
+    return this.db.prepare('SELECT * FROM legal_events WHERE monitor_id=? AND event_hash=?').get(monitorId, eventHash);
+  }
+  legalEvents(monitorId = null, limit = 200) {
+    const capped = Math.max(1, Math.min(Number(limit) || 200, 500));
+    return monitorId
+      ? this.db.prepare('SELECT * FROM legal_events WHERE monitor_id=? ORDER BY event_at DESC,created_at DESC LIMIT ?').all(monitorId, capped)
+      : this.db.prepare('SELECT * FROM legal_events ORDER BY event_at DESC,created_at DESC LIMIT ?').all(capped);
+  }
+  pendingLegalEvents(limit = 25) {
+    return this.db.prepare(`SELECT e.*,m.cnj,m.client_name,m.phone,m.notify_whatsapp,m.enabled
+      FROM legal_events e JOIN legal_monitors m ON m.id=e.monitor_id
+      WHERE e.send_status='waiting' AND m.enabled=1 AND m.notify_whatsapp=1
+      ORDER BY e.event_at ASC LIMIT ?`).all(Math.max(1, Math.min(Number(limit) || 25, 100)));
+  }
+  markLegalEvent(id, { sendStatus, messageId = null, error = '' }) {
+    this.db.prepare('UPDATE legal_events SET send_status=?,message_id=?,sent_at=?,error=? WHERE id=?')
+      .run(sendStatus, messageId, sendStatus === 'sent' ? iso() : null, error, id);
+  }
+  legalStats() {
+    const monitored = Number(this.db.prepare('SELECT COUNT(*) AS n FROM legal_monitors WHERE enabled=1').get()?.n || 0);
+    const alerts = Number(this.db.prepare("SELECT COUNT(*) AS n FROM legal_events WHERE send_status IN ('waiting','failed')").get()?.n || 0);
+    const sent = Number(this.db.prepare("SELECT COUNT(*) AS n FROM legal_events WHERE send_status='sent'").get()?.n || 0);
+    const lastScan = this.getMeta('legalLastScanAt') || null;
+    return { monitored, alerts, sent, lastScan };
+  }
+
   cancelPending(campaignId) { this.db.prepare("UPDATE recipients SET status='cancelled',reason='Campanha cancelada',updated_at=? WHERE campaign_id=? AND status IN ('pending','resolving')").run(iso(), campaignId); }
   recordAck(messageId, ack) {
     const row = this.db.prepare('SELECT * FROM recipients WHERE message_id=?').get(messageId);
