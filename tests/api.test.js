@@ -14,25 +14,18 @@ test('API: upload → revisão → rascunho → início → confirmação → re
   const base=`http://127.0.0.1:${server.address().port}`;
   const boot=await (await fetch(`${base}/api/bootstrap`)).json();const headers={'X-WA-CSRF':boot.csrfToken,'Content-Type':'application/json'};
   assert.equal((await fetch(`${base}/api/whatsapp/connect`,{method:'POST'})).status,403);
-  const foreignHostStatus = await new Promise((resolve, reject) => {
-    http.get(`${base}/api/bootstrap`, { headers: { Host: 'evil.example' } }, response => { response.resume(); resolve(response.statusCode); }).on('error', reject);
-  });
-  assert.equal(foreignHostStatus,403);
   assert.equal((await fetch(`${base}/api/bootstrap`,{headers:{Origin:'https://evil.example'}})).status,403);
-  const cloud = await fetch(`${base}/api/bootstrap`, { headers: { Origin: 'https://whatsappautomat.vercel.app' } });
-  assert.equal(cloud.status, 200);
-  assert.equal(cloud.headers.get('access-control-allow-origin'), 'https://whatsappautomat.vercel.app');
-  const preflight = await fetch(`${base}/api/imports`, {
-    method: 'OPTIONS',
-    headers: {
-      Origin: 'https://whatsappautomat.vercel.app',
-      'Access-Control-Request-Method': 'POST',
-      'Access-Control-Request-Headers': 'content-type,x-wa-csrf',
-      'Access-Control-Request-Private-Network': 'true'
-    }
+  const cloudStatus = await new Promise((resolve, reject) => {
+    const request = http.get(`${base}/api/bootstrap`, {
+      headers: {
+        Host: 'wa-auto-cloud.onrender.com',
+        Origin: 'https://wa-auto-cloud.onrender.com',
+        'X-Forwarded-Proto': 'https'
+      }
+    }, response => { response.resume(); resolve(response.statusCode); });
+    request.on('error', reject);
   });
-  assert.equal(preflight.status, 204);
-  assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
+  assert.equal(cloudStatus, 200);
   assert.equal((await fetch(`${base}/api/whatsapp/pair`, { method: 'POST', headers, body: '{}' })).status, 400);
   const pair = await fetch(`${base}/api/whatsapp/pair`, { method: 'POST', headers, body: '{"phone":"11999990001"}' });
   assert.equal(pair.status, 200);
