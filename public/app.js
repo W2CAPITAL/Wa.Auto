@@ -223,10 +223,24 @@ function renderDetail() {
   $('export-report').href = `/api/campaigns/${campaign.id}/report.csv`;
   $('export-report').setAttribute('download', '');
   const rows = entries.slice(state.detailPage * PAGE_SIZE, (state.detailPage + 1) * PAGE_SIZE);
-  const markup = rows.map(row => `<tr><td>${row.row_num}</td><td><button class="text-link" data-detail-entry="${row.id}">${escape(row.name)}</button></td><td>${escape(row.phone ? `+${row.phone}` : row.raw_phone || '—')}</td><td>${badge(row.status)}</td><td>${escape(row.reason || (row.message_id ? 'Registro confirmado pelo WhatsApp' : '—'))}</td></tr>`).join('');
+  const markup = rows.map(row => {
+    const resolution = row.status === 'uncertain' && campaign.status !== 'running'
+      ? `<div class="manual-resolution"><button class="text-link" data-resolve-entry="${row.id}" data-resolution="sent">Já chegou</button><button class="text-link" data-resolve-entry="${row.id}" data-resolution="retry">Tentar novamente</button></div>`
+      : '';
+    return `<tr><td>${row.row_num}</td><td><button class="text-link" data-detail-entry="${row.id}">${escape(row.name)}</button></td><td>${escape(row.phone ? `+${row.phone}` : row.raw_phone || '—')}</td><td>${badge(row.status)}</td><td>${escape(row.reason || (row.message_id ? 'Registro confirmado pelo WhatsApp' : '—'))}${resolution}</td></tr>`;
+  }).join('');
   if ($('campaign-detail-rows').innerHTML !== markup) {
     $('campaign-detail-rows').innerHTML = markup;
     for (const button of $('campaign-detail-rows').querySelectorAll('[data-detail-entry]')) button.addEventListener('click', () => { $('detail-message').textContent = entries.find(row => row.id === Number(button.dataset.detailEntry)).message; });
+    for (const button of $('campaign-detail-rows').querySelectorAll('[data-resolve-entry]')) button.addEventListener('click', () => void perform(button, async () => {
+      const action = button.dataset.resolution;
+      if (action === 'retry' && !confirm('Você conferiu a conversa e tem certeza de que esta mensagem não chegou? Esta linha voltará para a fila e poderá ser enviada novamente.')) return;
+      const detail = await api(`/api/campaigns/${campaign.id}/entries/${button.dataset.resolveEntry}/resolve`, { method: 'POST', body: { action } });
+      state.detail = detail;
+      renderDetail();
+      await poll();
+      toast(action === 'sent' ? 'Linha marcada como já enviada.' : 'Linha devolvida à fila. Revise e clique em Continuar envios.');
+    }));
   }
   $('detail-page-label').textContent = `${number(entries.length ? state.detailPage * PAGE_SIZE + 1 : 0)}–${number(Math.min((state.detailPage + 1) * PAGE_SIZE, entries.length))} de ${number(entries.length)}`;
   $('detail-prev').disabled = !state.detailPage;
