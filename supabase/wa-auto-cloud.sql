@@ -88,3 +88,43 @@ using (private.wa_auto_access_ok());
 
 revoke all on public.wa_auto_config from anon, authenticated;
 grant select, insert, update, delete on public.wa_auto_snapshots to anon, authenticated;
+
+
+-- Durable send intent journal.
+-- This tiny row closes the crash window between "about to send" and the next full snapshot.
+create table if not exists public.wa_auto_intents (
+  id text primary key check (id = 'active'),
+  kind text not null check (kind in ('campaign','legal')),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table public.wa_auto_intents enable row level security;
+
+drop policy if exists wa_auto_intents_select on public.wa_auto_intents;
+drop policy if exists wa_auto_intents_insert on public.wa_auto_intents;
+drop policy if exists wa_auto_intents_update on public.wa_auto_intents;
+drop policy if exists wa_auto_intents_delete on public.wa_auto_intents;
+
+create policy wa_auto_intents_select
+on public.wa_auto_intents for select
+to anon, authenticated
+using (private.wa_auto_access_ok());
+
+create policy wa_auto_intents_insert
+on public.wa_auto_intents for insert
+to anon, authenticated
+with check (private.wa_auto_access_ok());
+
+create policy wa_auto_intents_update
+on public.wa_auto_intents for update
+to anon, authenticated
+using (private.wa_auto_access_ok())
+with check (private.wa_auto_access_ok());
+
+create policy wa_auto_intents_delete
+on public.wa_auto_intents for delete
+to anon, authenticated
+using (private.wa_auto_access_ok());
+
+grant select, insert, update, delete on public.wa_auto_intents to anon, authenticated;
