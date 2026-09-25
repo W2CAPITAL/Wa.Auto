@@ -7,6 +7,7 @@ import { Queue } from './queue.js';
 import { createApp } from './app.js';
 import { RemoteSnapshot } from './remote-snapshot.js';
 import { LegalMonitorService } from './legal-monitor.js';
+import { ResourceGuard } from './resource-guard.js';
 
 const dataDir = path.resolve(process.env.WA_DATA_DIR || path.join(os.tmpdir(), 'wa-auto-cloud'));
 fs.mkdirSync(dataDir, { recursive: true });
@@ -41,17 +42,40 @@ try { acquireLock(); } catch (error) { console.error(error.message); process.exi
 process.on('exit', () => { try { if (fs.readFileSync(lockPath, 'utf8') === String(process.pid)) fs.unlinkSync(lockPath); } catch {} });
 
 const store = new Store(path.join(dataDir, 'wa-auto.sqlite'));
+
+try {
+  const intent = await snapshot.getIntent();
+  if (intent) {
+    const recovered = store.recoverCriticalIntent(intent);
+    await snapshot.save(dataDir, store);
+    await snapshot.clearIntent();
+    console.warn('Envio crítico recuperado após reinício:', recovered);
+  }
+} catch (error) {
+  console.error('Não foi possível reconciliar o diário de envio crítico:', error.message);
+  process.exit(1);
+}
+
+const retentionDays = Math.max(0, Math.min(Number(process.env.WA_HISTORY_RETENTION_DAYS ?? 30), 3650));
+store.pruneHistory(retentionDays);
+
 const persist = () => snapshot.schedule(dataDir, store);
+const resourceGuard = new ResourceGuard();
 const transport = new WhatsApp(dataDir, { onPersistentChange: persist });
 transport.on('state', state => console.log(`WhatsApp state: ${state.status}`));
-const queue = new Queue(store, transport);
+const queue = new Queue(store, transport, { resourceGuard, criticalIntent:snapshot });
 queue.on('change', persist);
 queue.on('queueError', persist);
 
-const legalMonitor = new LegalMonitorService(store, transport, { onMutation: persist });
+const legalMonitor = new LegalMonitorService(store, transport, {
+  onMutation: persist,
+  resourceGuard,
+  criticalIntent:snapshot,
+  sendDelayMs:Number(process.env.WA_LEGAL_SEND_DELAY_MS || 30000),
+});
 legalMonitor.start();
 
-const app = createApp({ store, transport, queue, legalMonitor, onMutation: persist });
+const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, onMutation: persist });
 const port = Number(process.env.PORT || 10000);
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`\nWA.Auto Cloud está pronto na porta ${port}.\n`);
@@ -67,11 +91,27 @@ const persistTimer = setInterval(() => {
 }, 15000);
 persistTimer.unref?.();
 
+const resourceTimer = setInterval(() => {
+  const resources = resourceGuard.snapshot();
+  if (resources.blocked) {
+    queue.pauseActive(`Pausa automática: memória em ${resources.rssMb} MB de ${resources.limitMb} MB.`);
+  }
+}, 10000);
+resourceTimer.unref?.();
+
+const pruneTimer = setInterval(() => {
+  const removed = store.pruneHistory(retentionDays);
+  if (removed.legal || removed.campaigns) persist();
+}, 6 * 60 * 60 * 1000);
+pruneTimer.unref?.();
+
 let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
   clearInterval(persistTimer);
+  clearInterval(resourceTimer);
+  clearInterval(pruneTimer);
   legalMonitor.stop();
   server.close();
   const deadline = setTimeout(() => process.exit(1), 20000);
