@@ -368,9 +368,27 @@ async function init() {
   refreshControls();
   setInterval(() => void poll(), 2000);
 }
-void init().catch(error => {
-  $('global-error').innerHTML = HOSTED_MODE
-    ? `${escape(error.message)} <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a> · <a href="https://github.com/W2CAPITAL/Wa.Auto/archive/refs/heads/main.zip">Baixar motor ↓</a>`
-    : escape(error.message);
-  $('global-error').classList.remove('hidden');
-});
+let appStarted = false;
+let appStarting = false;
+let bootstrapRetry = null;
+
+async function startApp() {
+  if (appStarted || appStarting) return;
+  appStarting = true;
+  try {
+    await init();
+    appStarted = true;
+    if (bootstrapRetry) { clearInterval(bootstrapRetry); bootstrapRetry = null; }
+  } catch (error) {
+    state.online = false;
+    $('global-error').innerHTML = HOSTED_MODE
+      ? `${escape(error.message)} <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a> · <a href="https://github.com/W2CAPITAL/Wa.Auto/archive/refs/heads/main.zip">Baixar motor ↓</a> <span class="muted">Tentando reconectar automaticamente…</span>`
+      : `${escape(error.message)} <span class="muted">Tentando novamente…</span>`;
+    $('global-error').classList.remove('hidden');
+    renderConnection();
+    if (!bootstrapRetry) bootstrapRetry = setInterval(() => void startApp(), 2000);
+  } finally {
+    appStarting = false;
+  }
+}
+void startApp();
