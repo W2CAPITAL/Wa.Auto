@@ -20,6 +20,11 @@ create table if not exists public.wa_auto_snapshots (
 alter table public.wa_auto_config enable row level security;
 alter table public.wa_auto_snapshots enable row level security;
 
+drop policy if exists wa_auto_snapshots_select on public.wa_auto_snapshots;
+drop policy if exists wa_auto_snapshots_insert on public.wa_auto_snapshots;
+drop policy if exists wa_auto_snapshots_update on public.wa_auto_snapshots;
+drop policy if exists wa_auto_snapshots_delete on public.wa_auto_snapshots;
+
 drop function if exists public.wa_auto_access_ok();
 
 create or replace function private.wa_auto_access_ok()
@@ -59,11 +64,6 @@ on public.wa_auto_config for all
 to anon, authenticated
 using (false)
 with check (false);
-
-drop policy if exists wa_auto_snapshots_select on public.wa_auto_snapshots;
-drop policy if exists wa_auto_snapshots_insert on public.wa_auto_snapshots;
-drop policy if exists wa_auto_snapshots_update on public.wa_auto_snapshots;
-drop policy if exists wa_auto_snapshots_delete on public.wa_auto_snapshots;
 
 create policy wa_auto_snapshots_select
 on public.wa_auto_snapshots for select
