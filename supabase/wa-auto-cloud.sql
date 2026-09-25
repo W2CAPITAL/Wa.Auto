@@ -3,6 +3,7 @@
 -- store only its SHA-256 hash in wa_auto_config.
 
 create extension if not exists pgcrypto;
+create schema if not exists private;
 
 create table if not exists public.wa_auto_config (
   id text primary key check (id = 'default'),
@@ -19,12 +20,14 @@ create table if not exists public.wa_auto_snapshots (
 alter table public.wa_auto_config enable row level security;
 alter table public.wa_auto_snapshots enable row level security;
 
-create or replace function public.wa_auto_access_ok()
+drop function if exists public.wa_auto_access_ok();
+
+create or replace function private.wa_auto_access_ok()
 returns boolean
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select exists (
     select 1
@@ -46,8 +49,16 @@ as $$
   );
 $$;
 
-revoke all on function public.wa_auto_access_ok() from public;
-grant execute on function public.wa_auto_access_ok() to anon, authenticated;
+revoke all on function private.wa_auto_access_ok() from public;
+grant usage on schema private to anon, authenticated;
+grant execute on function private.wa_auto_access_ok() to anon, authenticated;
+
+drop policy if exists wa_auto_config_deny on public.wa_auto_config;
+create policy wa_auto_config_deny
+on public.wa_auto_config for all
+to anon, authenticated
+using (false)
+with check (false);
 
 drop policy if exists wa_auto_snapshots_select on public.wa_auto_snapshots;
 drop policy if exists wa_auto_snapshots_insert on public.wa_auto_snapshots;
@@ -57,23 +68,23 @@ drop policy if exists wa_auto_snapshots_delete on public.wa_auto_snapshots;
 create policy wa_auto_snapshots_select
 on public.wa_auto_snapshots for select
 to anon, authenticated
-using (public.wa_auto_access_ok());
+using (private.wa_auto_access_ok());
 
 create policy wa_auto_snapshots_insert
 on public.wa_auto_snapshots for insert
 to anon, authenticated
-with check (public.wa_auto_access_ok());
+with check (private.wa_auto_access_ok());
 
 create policy wa_auto_snapshots_update
 on public.wa_auto_snapshots for update
 to anon, authenticated
-using (public.wa_auto_access_ok())
-with check (public.wa_auto_access_ok());
+using (private.wa_auto_access_ok())
+with check (private.wa_auto_access_ok());
 
 create policy wa_auto_snapshots_delete
 on public.wa_auto_snapshots for delete
 to anon, authenticated
-using (public.wa_auto_access_ok());
+using (private.wa_auto_access_ok());
 
 revoke all on public.wa_auto_config from anon, authenticated;
 grant select, insert, update, delete on public.wa_auto_snapshots to anon, authenticated;
