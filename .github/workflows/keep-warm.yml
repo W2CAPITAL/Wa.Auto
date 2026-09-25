@@ -15,22 +15,13 @@ jobs:
     timeout-minutes: 6
     steps:
       - name: Acordar e validar o WA.Auto
+        shell: bash
         run: |
           set -euo pipefail
           for i in $(seq 1 18); do
-            if body=$(curl --fail --show-error --silent --connect-timeout 15 --max-time 45               "https://wa-auto-cloud.onrender.com/api/health"); then
-              printf '%s
-' "$body" | tee /tmp/health.json
-              python - <<'PY'
-import json
-data=json.load(open('/tmp/health.json'))
-assert data.get("ok") is True, data
-resources=data.get("resources") or {}
-print("uptime:", data.get("uptime"))
-print("whatsapp:", data.get("whatsapp"))
-print("rssMb:", resources.get("rssMb"))
-print("pressure:", resources.get("pressure"))
-PY
+            if body=$(curl --fail --show-error --silent --connect-timeout 15 --max-time 45 "https://wa-auto-cloud.onrender.com/api/health"); then
+              printf '%s\n' "$body" | tee /tmp/health.json
+              python -c 'import json; d=json.load(open("/tmp/health.json")); assert d.get("ok") is True, d; r=d.get("resources") or {}; print("uptime:",d.get("uptime")); print("whatsapp:",d.get("whatsapp")); print("rssMb:",r.get("rssMb")); print("pressure:",r.get("pressure"))'
               exit 0
             fi
             sleep 15
