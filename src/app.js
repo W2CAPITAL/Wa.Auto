@@ -49,6 +49,13 @@ export function createApp({ store, transport, queue }) {
   app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0) }));
   app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy }));
   app.post('/api/whatsapp/connect', async (req, res) => { await transport.connect(); res.json(transport.snapshot()); });
+  app.post('/api/whatsapp/pair', async (req, res) => {
+    const { phone, error } = normalizePhone(req.body?.phone, '55');
+    requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
+    await transport.close();
+    await transport.connect({ phoneNumber: phone });
+    res.json(transport.snapshot());
+  });
   app.post('/api/whatsapp/disconnect', async (req, res) => { await transport.close(); res.json(transport.snapshot()); });
   app.post('/api/whatsapp/logout', async (req, res) => { await transport.logout(); res.json(transport.snapshot()); });
   app.post('/api/imports', upload.single('file'), async (req, res) => {
