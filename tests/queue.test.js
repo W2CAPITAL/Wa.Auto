@@ -13,7 +13,7 @@ test('fila envia apenas após início explícito, respeita intervalo e confirma�
   await queue.tick(); assert.equal(transport.sent.length, 0);
   queue.start(id); await Promise.all([queue.tick(),queue.tick(),queue.tick()]); assert.equal(transport.sent.length,1);
   await queue.tick(); assert.equal(transport.sent.length,1);
-  now += 10000; await queue.tick(); assert.equal(transport.sent.length,2);
+  now += 30000; await queue.tick(); assert.equal(transport.sent.length,2);
   await queue.tick(); assert.equal(f.store.campaign(id).status,'completed');
   transport.emit('ack',{id:'test-1',ack:2}); assert.equal(f.store.entries(id)[0].status,'delivered');
   transport.emit('ack',{id:'test-1',ack:3}); transport.emit('ack',{id:'test-1',ack:1}); assert.equal(f.store.entries(id)[0].status,'read');
@@ -38,7 +38,7 @@ test('falha depois do início do envio fica incerta e não é repetida ao contin
   t.send=async()=>{attempts++;throw new Error('connection lost');};
   const q=new Queue(f.store,t,{autoTick:false,now:()=>now});const id=f.create();q.start(id);await q.tick();
   assert.equal(f.store.entries(id)[0].status,'uncertain');assert.equal(f.store.campaign(id).status,'paused');
-  now+=10000;q.start(id);await q.tick();assert.equal(attempts,2);assert.equal(f.store.counts(id).uncertain,2);
+  now+=30000;q.start(id);await q.tick();assert.equal(attempts,2);assert.equal(f.store.counts(id).uncertain,2);
   assert.throws(()=>q.start(id),/não tem mensagens/);await q.close();f.store.close();
 });
 test('falha na consulta não marca como enviado e pode continuar após reconectar', async () => {
@@ -46,7 +46,7 @@ test('falha na consulta não marca como enviado e pode continuar após reconecta
   assert.equal(f.store.entries(id)[0].status,'pending');assert.equal(t.sent.length,0);assert.equal(f.store.campaign(id).status,'paused');await q.close();f.store.close();
 });
 test('SAIR e aliases de número evitam envio repetido ao mesmo WhatsApp', async () => {
-  const f=fixture();const t=new TestTransport();let now=100000;t.resolve=async()=> 'same@c.us';const q=new Queue(f.store,t,{autoTick:false,now:()=>now});const id=f.create();q.start(id);await q.tick();now+=10000;await q.tick();
+  const f=fixture();const t=new TestTransport();let now=100000;t.resolve=async()=> 'same@c.us';const q=new Queue(f.store,t,{autoTick:false,now:()=>now});const id=f.create();q.start(id);await q.tick();now+=30000;await q.tick();
   assert.equal(t.sent.length,1);assert.equal(f.store.entries(id)[1].status,'duplicate');
   await q.tick();const id2=f.create();t.emit('optout',{identities:['5511999990001']});q.start(id2);await q.tick();assert.equal(f.store.entries(id2)[0].status,'skipped');
   await q.close();f.store.close();
