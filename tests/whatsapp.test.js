@@ -20,6 +20,7 @@ class FakeClient extends EventEmitter {
   }
   async initialize() {
     this.emit('qr', 'qr-code-test');
+    await tick();
     this.emit('authenticated');
     this.emit('ready');
   }
