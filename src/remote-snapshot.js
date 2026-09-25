@@ -67,6 +67,9 @@ export class RemoteSnapshot {
     return rows?.[0] || null;
   }
 
+  begin(kind, payload) { return this.beginIntent(kind, payload); }
+  arm() { return this.armIntent(); }
+
   async beginIntent(kind, payload) {
     if (!this.configured) throw new Error('Persistência remota indisponível para registrar o envio.');
     const existing = await this.getIntent();
