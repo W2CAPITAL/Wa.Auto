@@ -33,6 +33,7 @@ try {
   await page.waitForFunction(() => document.getElementById('connection-dialog').open);
   assert.equal(await page.$eval('#connect-action', el => el.textContent), 'Conectar motor');
   assert.equal(await page.$eval('#pair-action', el => el.disabled), true);
+  assert.equal(await page.$eval('#connection-content a[download]', el => el.getAttribute('href')), '/INICIAR-WA.AUTO.cmd');
 
   await page.click('#connect-action');
   await new Promise(resolve => setTimeout(resolve, 1200));
