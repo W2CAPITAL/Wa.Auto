@@ -22,9 +22,26 @@ export function createApp({ store, transport, queue }) {
     });
     const host = req.headers.host || '';
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return res.status(403).json({ error: 'Acesso permitido apenas pelo endereço local.' });
-    if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
+
     const origin = req.headers.origin;
-    if (origin && origin !== `http://${host}`) return res.status(403).json({ error: 'Origem não permitida.' });
+    const localOrigin = `http://${host}`;
+    const cloudOrigin = process.env.WA_CLOUD_ORIGIN || 'https://whatsappautomat.vercel.app';
+    const allowedOrigin = !origin || origin === localOrigin || origin === cloudOrigin;
+    if (!allowedOrigin) return res.status(403).json({ error: 'Origem não permitida.' });
+    if (req.headers['sec-fetch-site'] === 'cross-site' && origin !== cloudOrigin) return res.status(403).json({ error: 'Origem não permitida.' });
+
+    if (origin === cloudOrigin) {
+      res.set({
+        'Access-Control-Allow-Origin': cloudOrigin,
+        'Access-Control-Allow-Methods': 'GET,HEAD,POST,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-WA-CSRF',
+        'Access-Control-Max-Age': '600',
+        'Vary': 'Origin',
+      });
+      if (req.headers['access-control-request-private-network'] === 'true') res.set('Access-Control-Allow-Private-Network', 'true');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    }
+
     if (req.path.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-wa-csrf'] !== csrfToken) return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
     next();
   });
