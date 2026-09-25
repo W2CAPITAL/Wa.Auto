@@ -11,7 +11,7 @@ import { normalizeCnj, resolveDataJudAlias } from './legal-monitor.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
-export function createApp({ store, transport, queue, legalMonitor = null, onMutation = () => {} }) {
+export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
@@ -50,9 +50,12 @@ export function createApp({ store, transport, queue, legalMonitor = null, onMuta
     }
     next();
   });
-  app.get('/api/health', (req, res) => res.json({ ok: true, service: 'WA.Auto', pid: process.pid, uptime: Math.floor(process.uptime()) }));
-  app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), legal: legalMonitor?.snapshot?.() || store.legalStats() }));
-  app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy, legal: legalMonitor?.snapshot?.() || store.legalStats() }));
+  app.get('/api/health', (req, res) => {
+    const resources = resourceGuard?.snapshot?.() || null;
+    res.json({ ok: true, service: 'WA.Auto', pid: process.pid, uptime: Math.floor(process.uptime()), resources, whatsapp:transport.snapshot().status });
+  });
+  app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), legal: legalMonitor?.snapshot?.() || store.legalStats(), resources:resourceGuard?.snapshot?.() || null }));
+  app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy, legal: legalMonitor?.snapshot?.() || store.legalStats(), resources:resourceGuard?.snapshot?.() || null }));
   app.post('/api/whatsapp/connect', async (req, res) => { await transport.connect(); res.json(transport.snapshot()); });
   app.post('/api/whatsapp/pair', async (req, res) => {
     const { phone, error } = normalizePhone(req.body?.phone, '55');
