@@ -29,6 +29,17 @@ try {
   await page.goto(base, { waitUntil: 'networkidle0' });
   assert.equal(await page.title(), 'WA.Auto — Conversas que chegam');
   assert.equal(await page.$eval('#review', el => el.disabled), true);
+
+  // Login alternative: phone pairing code path reaches the backend and can disconnect again.
+  await page.click('#connection-open');
+  await page.type('#pair-phone', '11999990001');
+  await page.click('#pair-action');
+  await page.waitForFunction(() => document.getElementById('connection-label').textContent.includes('conectado'));
+  assert.equal(transport.lastConnectOptions.phoneNumber, '5511999990001');
+  await page.click('#connect-action');
+  await page.waitForFunction(() => document.getElementById('connection-label').textContent.includes('desconectado'));
+  await page.click('[data-close="connection-dialog"]');
+
   await page.screenshot({ path: 'test-results/01-desktop.png', fullPage: true });
   const fixturePath = path.join(temp, 'clientes-exemplo.csv');
   fs.writeFileSync(fixturePath, 'Cliente;Telefone;Observacoes\nAna Exemplo;11999990001;\nBruno Exemplo;21999990002;\nAna Repetida;11999990001;\nCliente sem telefone;;\nContato bloqueado;31999990003;NÃO FALAR\n');
