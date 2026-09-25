@@ -121,8 +121,13 @@ export class WhatsApp extends EventEmitter {
           const loggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
           this.client = null;
           if (loggedOut) {
-            this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'A sessão foi desconectada pelo WhatsApp. Gere um novo QR Code.' });
-            this.persistSoon();
+            ++this.generation;
+            void fs.promises.rm(path.join(this.dataDir, 'baileys-auth'), { recursive: true, force: true }).then(() => {
+              this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A sessão expirou. Clique em Gerar QR Code para conectar novamente.' });
+              this.persistSoon();
+            }).catch(() => {
+              this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'A sessão expirou e não pôde ser limpa. Use Esquecer sessão e gere outro QR Code.' });
+            });
           } else {
             this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão caiu. A fila foi pausada e a reconexão será tentada automaticamente.' });
             if (!this.manualClose) {
@@ -172,7 +177,12 @@ export class WhatsApp extends EventEmitter {
       }
     } catch (error) {
       this.client = null;
-      this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'Falha ao iniciar a conexão cloud do WhatsApp. Tente novamente.' });
+      this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão com o WhatsApp falhou temporariamente. Você pode tentar novamente agora.' });
+      if (!this.manualClose && !phoneNumber) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = setTimeout(() => void this.connect().catch(() => {}), 5000);
+        this.reconnectTimer.unref?.();
+      }
       throw error;
     } finally {
       this.connecting = false;
