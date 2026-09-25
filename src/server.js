@@ -36,6 +36,9 @@ const server = app.listen(port, '127.0.0.1', () => {
   if (process.env.WA_OPEN_BROWSER === '1' && process.platform === 'win32') {
     spawn('cmd.exe', ['/c', 'start', '', url], { stdio: 'ignore', windowsHide: true }).on('error', () => {});
   }
+  if (process.env.WA_AUTO_CONNECT === '1') {
+    setImmediate(() => void transport.connect().catch(error => console.error('Falha ao iniciar conexão do WhatsApp:', error.message)));
+  }
 });
 server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `A porta ${port} já está em uso. Feche a outra instância ou altere PORT.` : error.message); process.exit(1); });
 let stopping = false;
