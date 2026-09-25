@@ -211,9 +211,14 @@ export class Store {
     const days = Math.max(0, Math.min(Number(retentionDays) || 0, 3650));
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
     return this.transaction(() => {
-      const legal = this.db.prepare("DELETE FROM legal_events WHERE created_at<? AND send_status NOT IN ('waiting','sending','uncertain')").run(cutoff).changes;
+      // Keep the legal event hash/source/date as a tiny deduplication tombstone.
+      // Removing the row entirely would make an old tribunal event look "new" again.
+      const legalScrubbed = this.db.prepare(`UPDATE legal_events
+        SET details='', title='Movimentação processual arquivada'
+        WHERE created_at<? AND send_status NOT IN ('waiting','sending','uncertain')
+          AND (details<>'' OR title<>'Movimentação processual arquivada')`).run(cutoff).changes;
       const campaigns = this.db.prepare("DELETE FROM campaigns WHERE created_at<? AND status IN ('completed','cancelled')").run(cutoff).changes;
-      return { legal, campaigns, cutoff };
+      return { legalScrubbed, campaigns, cutoff };
     });
   }
   legalStats() {
