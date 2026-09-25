@@ -1,4 +1,7 @@
 const $ = id => document.getElementById(id);
+const HOSTED_MODE = !['127.0.0.1', 'localhost'].includes(location.hostname);
+const API_ORIGIN = HOSTED_MODE ? 'http://127.0.0.1:3210' : '';
+const apiUrl = url => `${API_ORIGIN}${url}`;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const labels = { draft: 'Rascunho', running: 'Em andamento', paused: 'Pausada', completed: 'Concluída', cancelled: 'Cancelada', pending: 'Pronta para enviar', resolving: 'Conferindo número', sending: 'Enviando', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', uncertain: 'Conferir no WhatsApp', invalid: 'Revisar dados', duplicate: 'Repetido', skipped: 'Não contatar', excluded: 'Não selecionado', failed_delivery: 'Falha de entrega' };
 const badge = status => `<span class="badge ${escape(status)}">${escape(labels[status] || status)}</span>`;
@@ -18,8 +21,18 @@ async function api(url, options = {}) {
   if (options.body && !(options.body instanceof FormData)) { headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(options.body); }
   if (options.method && options.method !== 'GET') headers['X-WA-CSRF'] = state.token;
   let response;
-  try { response = await fetch(url, { ...options, headers, cache: 'no-store' }); }
-  catch { throw new Error('O WA.Auto não respondeu. Confira se a janela do programa continua aberta.'); }
+  try {
+    response = await fetch(apiUrl(url), {
+      ...options,
+      headers,
+      cache: 'no-store',
+      ...(HOSTED_MODE ? { targetAddressSpace: 'local' } : {}),
+    });
+  } catch {
+    throw new Error(HOSTED_MODE
+      ? 'O painel abriu, mas o motor local não respondeu. Abra INICIAR-WINDOWS.cmd neste computador, permita o acesso à rede local no Chrome e tente novamente.'
+      : 'O WA.Auto não respondeu. Confira se a janela do programa continua aberta.');
+  }
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Não foi possível concluir.');
   return result;
@@ -220,7 +233,7 @@ function renderDetail() {
   const sent = ['sent', 'delivered', 'read'].reduce((n, key) => n + (campaign.counts[key] || 0), 0);
   const delivered = (campaign.counts.delivered || 0) + (campaign.counts.read || 0);
   $('campaign-detail-summary').innerHTML = `<div class="detail-summary">${badge(campaign.status)}<span>${number(sent)} enviada(s)</span><span>${number(delivered)} entregue(s)</span><span>${number(campaign.counts.pending)} pendente(s)</span><span>${number(campaign.counts.uncertain)} para conferir</span></div>${campaign.reason ? `<div class="reason-banner">${escape(campaign.reason)}</div>` : ''}`;
-  $('export-report').href = `/api/campaigns/${campaign.id}/report.csv`;
+  $('export-report').href = apiUrl(`/api/campaigns/${campaign.id}/report.csv`);
   $('export-report').setAttribute('download', '');
   const rows = entries.slice(state.detailPage * PAGE_SIZE, (state.detailPage + 1) * PAGE_SIZE);
   const markup = rows.map(row => {
@@ -322,6 +335,13 @@ async function poll() {
   } finally { polling = false; }
 }
 async function init() {
+  if (HOSTED_MODE) {
+    document.documentElement.dataset.hosted = 'true';
+    const banner = $('global-error');
+    banner.classList.remove('hidden', 'error');
+    banner.classList.add('info');
+    banner.innerHTML = 'Painel hospedado ativo. Para conectar o WhatsApp, mantenha o <strong>motor WA.Auto</strong> aberto neste PC. <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a>';
+  }
   const response = await api('/api/bootstrap');
   state.token = response.csrfToken; state.connection = response.connection; state.campaigns = response.campaigns;
   const draft = getDraft();
@@ -337,4 +357,9 @@ async function init() {
   refreshControls();
   setInterval(() => void poll(), 2000);
 }
-void init().catch(error => { $('global-error').textContent = error.message; $('global-error').classList.remove('hidden'); });
+void init().catch(error => {
+  $('global-error').innerHTML = HOSTED_MODE
+    ? `${escape(error.message)} <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a>`
+    : escape(error.message);
+  $('global-error').classList.remove('hidden');
+});
