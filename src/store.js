@@ -134,20 +134,36 @@ export class Store {
   suppressions() { return this.db.prepare('SELECT * FROM suppressions ORDER BY created_at DESC').all(); }
   removeSuppression(identity) { this.db.prepare('DELETE FROM suppressions WHERE identity=?').run(identity); }
 
-  createLegalMonitor({ cnj, clientName, phone, tribunalAlias = '', mode = 'both', notifyWhatsapp = true }) {
+  createLegalMonitor({
+    cnj, clientName, phone, tribunalAlias = '', mode = 'both', notifyWhatsapp = true,
+    lastReturnAt = null, nextReturnAt = null, sheetMovementAt = null, sheetMovementText = '',
+    lastNotifiedAt = null, sourceImportId = null, sourceSheet = null, sourceRow = null
+  }) {
     const now = iso();
     const existing = this.db.prepare('SELECT id FROM legal_monitors WHERE cnj=? AND phone=?').get(cnj, phone);
     const id = existing?.id || randomUUID();
-    this.db.prepare(`INSERT INTO legal_monitors(
-      id,cnj,client_name,phone,tribunal_alias,mode,enabled,notify_whatsapp,created_at,updated_at
-    ) VALUES(?,?,?,?,?,?,1,?,?,?)
-    ON CONFLICT(cnj,phone) DO UPDATE SET
-      client_name=excluded.client_name,
-      tribunal_alias=excluded.tribunal_alias,
-      mode=excluded.mode,
-      notify_whatsapp=excluded.notify_whatsapp,
-      enabled=1,
-      updated_at=excluded.updated_at`).run(id, cnj, clientName, phone, tribunalAlias, mode, notifyWhatsapp ? 1 : 0, now, now);
+    const sql = [
+      'INSERT INTO legal_monitors(',
+      'id,cnj,client_name,phone,tribunal_alias,mode,enabled,notify_whatsapp,created_at,updated_at,',
+      'last_return_at,next_return_at,sheet_movement_at,sheet_movement_text,last_notified_at,source_import_id,source_sheet,source_row',
+      ') VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)',
+      'ON CONFLICT(cnj,phone) DO UPDATE SET',
+      'client_name=excluded.client_name,tribunal_alias=excluded.tribunal_alias,mode=excluded.mode,',
+      'notify_whatsapp=excluded.notify_whatsapp,enabled=1,',
+      "last_return_at=CASE WHEN excluded.last_return_at IS NULL OR excluded.last_return_at='' THEN legal_monitors.last_return_at WHEN legal_monitors.last_return_at IS NULL OR legal_monitors.last_return_at='' OR excluded.last_return_at>legal_monitors.last_return_at THEN excluded.last_return_at ELSE legal_monitors.last_return_at END,",
+      "next_return_at=COALESCE(NULLIF(excluded.next_return_at,''),legal_monitors.next_return_at),",
+      "sheet_movement_at=COALESCE(NULLIF(excluded.sheet_movement_at,''),legal_monitors.sheet_movement_at),",
+      "sheet_movement_text=CASE WHEN excluded.sheet_movement_text<>'' THEN excluded.sheet_movement_text ELSE legal_monitors.sheet_movement_text END,",
+      "last_notified_at=CASE WHEN excluded.last_notified_at IS NULL OR excluded.last_notified_at='' THEN legal_monitors.last_notified_at WHEN legal_monitors.last_notified_at IS NULL OR legal_monitors.last_notified_at='' OR excluded.last_notified_at>legal_monitors.last_notified_at THEN excluded.last_notified_at ELSE legal_monitors.last_notified_at END,",
+      "source_import_id=COALESCE(NULLIF(excluded.source_import_id,''),legal_monitors.source_import_id),",
+      "source_sheet=COALESCE(NULLIF(excluded.source_sheet,''),legal_monitors.source_sheet),",
+      'source_row=COALESCE(excluded.source_row,legal_monitors.source_row),updated_at=excluded.updated_at'
+    ].join(' ');
+    this.db.prepare(sql).run(
+      id, cnj, clientName, phone, tribunalAlias, mode, notifyWhatsapp ? 1 : 0, now, now,
+      lastReturnAt, nextReturnAt, sheetMovementAt, String(sheetMovementText || '').slice(0,4000), lastNotifiedAt,
+      sourceImportId, sourceSheet, sourceRow
+    );
     return this.legalMonitor(id);
   }
   legalMonitor(id) {
@@ -159,15 +175,56 @@ export class Store {
     return this.db.prepare('SELECT * FROM legal_monitors ORDER BY created_at DESC').all().map(row => ({ ...row, enabled: !!row.enabled, notify_whatsapp: !!row.notify_whatsapp }));
   }
   updateLegalMonitor(id, values = {}) {
-    const allowed = new Set(['client_name','phone','tribunal_alias','mode','enabled','notify_whatsapp','last_checked_at','last_event_at','last_event_hash','last_event_source','last_event_text','error']);
+    const allowed = new Set([
+      'client_name','phone','tribunal_alias','mode','enabled','notify_whatsapp','last_checked_at','last_event_at','last_event_hash','last_event_source','last_event_text',
+      'last_return_at','next_return_at','sheet_movement_at','sheet_movement_text','last_notified_at','last_notified_hash','source_import_id','source_sheet','source_row','error'
+    ]);
     const entries = Object.entries(values).filter(([key]) => allowed.has(key));
     if (!entries.length) return this.legalMonitor(id);
     const normalized = entries.map(([key, value]) => [key, ['enabled','notify_whatsapp'].includes(key) ? (value ? 1 : 0) : value]);
-    this.db.prepare(`UPDATE legal_monitors SET ${normalized.map(([key]) => `${key}=?`).join(',')},updated_at=? WHERE id=?`).run(...normalized.map(([,value]) => value), iso(), id);
+    const assignments = normalized.map(([key]) => key + '=?').join(',');
+    this.db.prepare('UPDATE legal_monitors SET ' + assignments + ',updated_at=? WHERE id=?').run(...normalized.map(([,value]) => value), iso(), id);
     return this.legalMonitor(id);
   }
-  deleteLegalMonitor(id) { this.db.prepare('DELETE FROM legal_monitors WHERE id=?').run(id); }
+  setLegalReturn({ phone, cnj = null, at, source = 'planilha' }) {
+    if (!phone || !at) return { monitors:0, covered:0 };
+    const rows = cnj
+      ? this.db.prepare('SELECT id,last_return_at FROM legal_monitors WHERE phone=? AND cnj=?').all(phone, cnj)
+      : this.db.prepare('SELECT id,last_return_at FROM legal_monitors WHERE phone=?').all(phone);
+    let changed = 0, covered = 0;
+    for (const row of rows) {
+      if (!row.last_return_at || at > row.last_return_at) {
+        this.db.prepare('UPDATE legal_monitors SET last_return_at=?,updated_at=? WHERE id=?').run(at, iso(), row.id);
+        changed++;
+      }
+      covered += this.db.prepare("UPDATE legal_events SET send_status='covered_by_return',error=? WHERE monitor_id=? AND send_status IN ('waiting','failed') AND event_at<=?")
+        .run('Coberto pelo último retorno ao cliente (' + source + ').', row.id, at).changes;
+    }
+    return { monitors:changed, covered };
+  }
+  markLegalNotified(monitorId, events, sentAt = iso()) {
+    const list = Array.isArray(events) ? events : [];
+    const latest = [...list].sort((a,b) => String(b.event_at || b.eventAt || '').localeCompare(String(a.event_at || a.eventAt || '')))[0];
+    this.updateLegalMonitor(monitorId, {
+      ...(latest ? { last_notified_at:latest.event_at || latest.eventAt, last_notified_hash:latest.event_hash || latest.hash || null } : {}),
+      last_return_at:sentAt
+    });
+    this.db.prepare("UPDATE legal_events SET send_status='covered_by_return',error='Já coberto por um retorno mais recente ao cliente.' WHERE monitor_id=? AND send_status IN ('waiting','failed') AND event_at<=?")
+      .run(monitorId, sentAt);
+  }
+  markLegalReturnFromCampaignEntry(entry, at = iso()) {
+    if (!entry?.phone) return { monitors:0, covered:0 };
+    let values = {};
+    try { values = JSON.parse(entry.data || '{}') || {}; } catch {}
+    const candidate = Object.entries(values).find(([key]) => /protocolo|processo|cnj/i.test(String(key)));
+    const digits = String(candidate?.[1] || '').replace(/\D/g,'');
+    const cnj = digits.length === 20 ? digits : null;
+    if (!cnj) return { monitors:0, covered:0 };
+    return this.setLegalReturn({ phone:entry.phone, cnj, at, source:'mensagem enviada pelo WA.Auto' });
+  }
+    deleteLegalMonitor(id) { this.db.prepare('DELETE FROM legal_monitors WHERE id=?').run(id); }
   hasLegalEvent(monitorId, eventHash) { return !!this.db.prepare('SELECT id FROM legal_events WHERE monitor_id=? AND event_hash=?').get(monitorId, eventHash); }
+  hasEquivalentLegalEvent(monitorId, eventAt, title) { return !!this.db.prepare('SELECT id FROM legal_events WHERE monitor_id=? AND event_at=? AND lower(title)=lower(?) LIMIT 1').get(monitorId, eventAt, String(title || '')); }
   recordLegalEvent({ monitorId, eventHash, source, title, details = '', eventAt, sendStatus = 'waiting' }) {
     const id = randomUUID();
     this.db.prepare(`INSERT OR IGNORE INTO legal_events(id,monitor_id,event_hash,source,title,details,event_at,created_at,send_status)
@@ -181,7 +238,7 @@ export class Store {
       : this.db.prepare('SELECT * FROM legal_events ORDER BY event_at DESC,created_at DESC LIMIT ?').all(capped);
   }
   pendingLegalEvents(limit = 25) {
-    return this.db.prepare(`SELECT e.*,m.cnj,m.client_name,m.phone,m.notify_whatsapp,m.enabled
+    return this.db.prepare(`SELECT e.*,m.cnj,m.client_name,m.phone,m.notify_whatsapp,m.enabled,m.last_return_at,m.last_notified_at
       FROM legal_events e JOIN legal_monitors m ON m.id=e.monitor_id
       WHERE e.send_status='waiting' AND m.enabled=1 AND m.notify_whatsapp=1
       ORDER BY e.event_at ASC LIMIT ?`).all(Math.max(1, Math.min(Number(limit) || 25, 100)));
@@ -243,8 +300,9 @@ export class Store {
     const monitored = Number(this.db.prepare('SELECT COUNT(*) AS n FROM legal_monitors WHERE enabled=1').get()?.n || 0);
     const alerts = Number(this.db.prepare("SELECT COUNT(*) AS n FROM legal_events WHERE send_status IN ('waiting','failed')").get()?.n || 0);
     const sent = Number(this.db.prepare("SELECT COUNT(*) AS n FROM legal_events WHERE send_status='sent'").get()?.n || 0);
+    const covered = Number(this.db.prepare("SELECT COUNT(*) AS n FROM legal_events WHERE send_status='covered_by_return'").get()?.n || 0);
     const lastScan = this.getMeta('legalLastScanAt') || null;
-    return { monitored, alerts, sent, lastScan };
+    return { monitored, alerts, sent, covered, lastScan };
   }
 
   cancelPending(campaignId) { this.db.prepare("UPDATE recipients SET status='cancelled',reason='Campanha cancelada',updated_at=? WHERE campaign_id=? AND status IN ('pending','resolving')").run(iso(), campaignId); }
