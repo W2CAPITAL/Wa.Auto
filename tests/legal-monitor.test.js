@@ -86,3 +86,53 @@ test('monitor cria linha de base sem disparar histórico e envia apenas novidade
   service.stop();
   store.close();
 });
+
+
+test('planilha só coloca na fila movimentação posterior ao último retorno do cliente', async () => {
+  const store=new Store(':memory:');
+  const transport=new TestTransport();
+  transport.ready=false;
+  const service=new LegalMonitorService(store,transport,{fetchImpl:makeFetch(),onMutation:()=>{},scanIntervalMs:999999,minTriggerIntervalMs:0,sendDelayMs:0});
+  const monitor=store.createLegalMonitor({
+    cnj,
+    clientName:'Cliente Retorno',
+    phone:'5511999990001',
+    tribunalAlias:'tjsp',
+    mode:'datajud',
+    notifyWhatsapp:true,
+    lastReturnAt:'2026-09-24T23:59:59.999Z'
+  });
+
+  const newer=service.syncSpreadsheetSnapshot(monitor,{
+    lastReturnAt:'24/09/2026',
+    movementAt:'25/09/2026 14:45',
+    movementText:'Conclusos para despacho',
+    sourceSheet:'Processos',
+    sourceRow:2
+  });
+  assert.equal(newer.queued,1);
+  assert.equal(store.legalEvents(monitor.id).filter(e=>e.send_status==='waiting').length,1);
+
+  const older=service.syncSpreadsheetSnapshot(store.legalMonitor(monitor.id),{
+    lastReturnAt:'24/09/2026',
+    movementAt:'23/09/2026 10:00',
+    movementText:'Distribuição',
+    sourceSheet:'Processos',
+    sourceRow:2
+  });
+  assert.equal(older.covered,1);
+  assert.equal(store.legalEvents(monitor.id).filter(e=>e.send_status==='covered_by_return').length,1);
+
+  transport.ready=true;
+  const sent=await service.sendPendingNotifications({maxGroups:1});
+  assert.equal(sent.sent,1);
+  assert.equal(transport.sent.length,1);
+  assert.match(transport.sent[0].message,/Conclusos para despacho/);
+  const updated=store.legalMonitor(monitor.id);
+  assert.ok(updated.last_return_at);
+  assert.ok(updated.last_notified_at);
+  assert.equal(store.pendingLegalEvents(10).length,0);
+
+  service.stop();
+  store.close();
+});
