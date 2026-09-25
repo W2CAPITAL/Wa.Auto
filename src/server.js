@@ -48,6 +48,7 @@ process.on('exit', () => { try { if (fs.readFileSync(lockPath, 'utf8') === Strin
 const store = new Store(path.join(dataDir, 'wa-auto.sqlite'));
 const persist = () => snapshot?.schedule(dataDir, store);
 const transport = new WhatsApp(dataDir, { onPersistentChange: persist });
+transport.on('state', state => console.log(`WhatsApp state: ${state.status}`));
 const queue = new Queue(store, transport);
 queue.on('change', persist);
 queue.on('queueError', persist);
