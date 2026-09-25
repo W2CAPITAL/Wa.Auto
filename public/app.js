@@ -340,7 +340,9 @@ async function init() {
     const banner = $('global-error');
     banner.classList.remove('hidden', 'error');
     banner.classList.add('info');
-    banner.innerHTML = 'Painel hospedado ativo. Para conectar o WhatsApp, mantenha o <strong>motor WA.Auto</strong> aberto neste PC. <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a>';
+    banner.innerHTML = 'Painel hospedado ativo. Para conectar o WhatsApp, mantenha o <strong>motor WA.Auto</strong> aberto neste PC. <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a> · <a href="https://github.com/W2CAPITAL/Wa.Auto/archive/refs/heads/main.zip">Baixar motor para Windows ↓</a>';
+    const localDot = document.querySelector('.sidebar-bottom .local-dot');
+    if (localDot) localDot.innerHTML = '<span></span> Painel Vercel · motor local';
   }
   const response = await api('/api/bootstrap');
   state.token = response.csrfToken; state.connection = response.connection; state.campaigns = response.campaigns;
@@ -359,7 +361,7 @@ async function init() {
 }
 void init().catch(error => {
   $('global-error').innerHTML = HOSTED_MODE
-    ? `${escape(error.message)} <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a>`
+    ? `${escape(error.message)} <a href="http://127.0.0.1:3210" target="_blank" rel="noreferrer">Abrir motor local ↗</a> · <a href="https://github.com/W2CAPITAL/Wa.Auto/archive/refs/heads/main.zip">Baixar motor ↓</a>`
     : escape(error.message);
   $('global-error').classList.remove('hidden');
 });
