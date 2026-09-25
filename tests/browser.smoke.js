@@ -8,6 +8,7 @@ import puppeteer from 'puppeteer';
 import { Store } from '../src/store.js';
 import { Queue } from '../src/queue.js';
 import { createApp } from '../src/app.js';
+import { LegalMonitorService } from '../src/legal-monitor.js';
 import { TestTransport } from './helpers.js';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-auto-ui-'));
@@ -15,11 +16,17 @@ const store = new Store(':memory:');
 const transport = new TestTransport();
 transport.ready = false;
 const queue = new Queue(store, transport, { autoTick: false });
-const legalMonitor = {
-  snapshot: () => ({ ...store.legalStats(), busy: false }),
-  scanOne: async () => ({ newEvents: 0, sent: 0, failed: 0, sources: { DataJud: true } }),
-  trigger: async () => ({ checked: store.legalMonitors().filter(item => item.enabled).length, newEvents: 0, sent: 0, failed: 0, ...store.legalStats(), busy: false }),
+const legalFetch = async url => {
+  if (String(url).includes('datajud')) return new Response(JSON.stringify({ hits:{ hits:[] } }), { status:200 });
+  return new Response(JSON.stringify({ items:[] }), { status:200 });
 };
+const legalMonitor = new LegalMonitorService(store, transport, {
+  fetchImpl:legalFetch,
+  onMutation:()=>{},
+  scanIntervalMs:999999,
+  minTriggerIntervalMs:0,
+  sendDelayMs:0
+});
 const server = createApp({ store, transport, queue, legalMonitor }).listen(0, '127.0.0.1');
 await once(server, 'listening');
 fs.mkdirSync('test-results', { recursive: true });
@@ -49,7 +56,7 @@ try {
 
   await page.screenshot({ path: 'test-results/01-desktop.png', fullPage: true });
   const fixturePath = path.join(temp, 'clientes-exemplo.csv');
-  fs.writeFileSync(fixturePath, 'Cliente;Telefone;Processo;Autorizado;Observacoes\nAna Exemplo;11999990001;00000000020268260000;sim;\nBruno Exemplo;21999990002;00000010020268260000;sim;\nAna Repetida;11999990001;00000000020268260000;sim;\nCliente sem telefone;;00000020020268260000;sim;\nContato bloqueado;31999990003;00000030020268260000;sim;NÃO FALAR\n');
+  fs.writeFileSync(fixturePath, 'Cliente;Telefone;Processo;Retorno;Proximo_Retorno;Data_Movimentacao;Andamento;Autorizado;Observacoes\nAna Exemplo;11999990001;00000000020268260000;24/09/2026;30/09/2026;25/09/2026;Despacho proferido;sim;\nBruno Exemplo;21999990002;00000010020268260000;25/09/2026;30/09/2026;24/09/2026;Distribuição;sim;\nAna Repetida;11999990001;00000000020268260000;24/09/2026;30/09/2026;25/09/2026;Despacho proferido;sim;\nCliente sem telefone;;00000020020268260000;24/09/2026;30/09/2026;25/09/2026;Movimento;sim;\nContato bloqueado;31999990003;00000030020268260000;24/09/2026;30/09/2026;25/09/2026;Movimento;sim;NÃO FALAR\n');
   await (await page.$('#file-input')).uploadFile(fixturePath);
   await page.waitForFunction(() => !document.getElementById('mapping').classList.contains('hidden'));
   assert.equal(await page.$eval('#phone-column', el => el.value), 'Telefone');
@@ -98,12 +105,20 @@ try {
   assert.equal(await page.$eval('#legal-process-column', el => el.value), 'Processo');
   assert.equal(await page.$eval('#legal-phone-column', el => el.value), 'Telefone');
   assert.equal(await page.$eval('#legal-consent-column', el => el.value), 'Autorizado');
+  assert.equal(await page.$eval('#legal-last-return-column', el => el.value), 'Retorno');
+  assert.equal(await page.$eval('#legal-next-return-column', el => el.value), 'Proximo_Retorno');
+  assert.equal(await page.$eval('#legal-movement-date-column', el => el.value), 'Data_Movimentacao');
+  assert.equal(await page.$eval('#legal-movement-text-column', el => el.value), 'Andamento');
   assert.equal(await page.$eval('#legal-import-button', el => el.disabled), false);
   await page.click('#legal-import-button');
   await page.waitForFunction(() => document.getElementById('legal-monitor-list').textContent.includes('Ana Exemplo'));
   assert.match(await page.$eval('#legal-monitor-list', el => el.innerText), /Bruno Exemplo/);
+  assert.match(await page.$eval('#legal-monitor-list', el => el.innerText), /Último retorno/);
+  assert.match(await page.$eval('#legal-import-result', el => el.innerText), /1 movimentação\(ões\) depois do último retorno/);
   assert.doesNotMatch(await page.$eval('#legal-monitor-list', el => el.innerText), /Contato bloqueado/);
   assert.equal(store.legalMonitors().length, 2);
+  assert.equal(store.legalEvents().filter(event => event.send_status === 'waiting').length, 1);
+  assert.equal(store.legalEvents().filter(event => event.send_status === 'covered_by_return').length, 1);
   await page.type('#legal-cnj', '0000004-00.2026.8.26.0000');
   await page.type('#legal-client', 'Cliente Manual');
   await page.type('#legal-phone', '41999990004');
@@ -145,6 +160,7 @@ try {
   throw error;
 } finally {
   await browser?.close();
+  legalMonitor.stop();
   await queue.close();
   await new Promise(resolve => server.close(resolve));
   store.close();
