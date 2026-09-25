@@ -319,6 +319,12 @@ dialog::backdrop{background:rgba(20,36,30,.38);backdrop-filter:blur(5px)}
 .legal-source-note{margin-top:14px;padding:12px 13px;border:1px solid #dbe9df;background:#f5faf6;border-radius:10px;color:#5d6d65}
 .legal-source-note strong{display:block;font-size:11px;color:#244b3b}
 .legal-source-note p{font-size:9px;line-height:1.55;margin:5px 0 0}
+.legal-rule-banner{display:flex;align-items:flex-start;gap:11px;margin:0 0 14px;padding:12px 14px;border:1px solid #cfe4d6;background:#f2faf4;border-radius:11px;color:#385148}
+.legal-rule-banner>span{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#d9f0df;color:#13744f;font-weight:900;flex:0 0 auto}
+.legal-rule-banner strong{display:block;font-size:11px;color:#214a39}
+.legal-rule-banner p{font-size:9px;line-height:1.5;margin:4px 0 0;color:#68786f}
+.legal-import-result{margin:11px 0 0;color:#738078;font-size:9px;line-height:1.5}
+.legal-return-badge{display:inline-flex;margin-left:7px;padding:3px 7px;border-radius:999px;background:#e8f4ec;color:#286e50;font-size:8px;font-weight:800}
 .legal-monitor-list{display:grid;gap:10px}
 .legal-monitor-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px;border:1px solid #e3e9e5;border-radius:11px;background:#fbfcfb}
 .legal-monitor-main{min-width:0;flex:1}
@@ -330,7 +336,8 @@ dialog::backdrop{background:rgba(20,36,30,.38);backdrop-filter:blur(5px)}
 .legal-source-error{margin-top:8px;background:#fff3e8;border:1px solid #f0ddc9;color:#9a6b36;border-radius:8px;padding:7px 9px;font-size:9px}
 .legal-monitor-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .legal-import-card{margin-top:18px}
-.legal-import-controls{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) .8fr auto;gap:10px;align-items:end}
+.legal-import-controls{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;align-items:end}
+.legal-import-controls .button{min-height:38px}
 .legal-import-controls label{font-size:10px}
 .legal-event-row .history-icon{font-weight:900}
 .legal-event-row .history-info p{font-size:9px;color:#6c7a73;line-height:1.45;margin:5px 0 0;max-width:850px}
