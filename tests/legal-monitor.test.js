@@ -56,7 +56,7 @@ test('monitor cria linha de base sem disparar histórico e envia apenas novidade
   const store=new Store(':memory:');
   const transport=new TestTransport();
   const fetchImpl=makeFetch();
-  const service=new LegalMonitorService(store,transport,{fetchImpl,onMutation:()=>{},scanIntervalMs:999999,minTriggerIntervalMs:0});
+  const service=new LegalMonitorService(store,transport,{fetchImpl,onMutation:()=>{},scanIntervalMs:999999,minTriggerIntervalMs:0,sendDelayMs:0});
   const monitor=store.createLegalMonitor({
     cnj,
     clientName:'Ana Cliente',
