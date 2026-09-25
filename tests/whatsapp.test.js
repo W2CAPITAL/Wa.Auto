@@ -19,7 +19,8 @@ class FakeClient extends EventEmitter {
     FakeClient.instance = this;
   }
   async initialize() {
-    this.emit('qr', 'qr-code-test');
+    if (this.options.pairWithPhoneNumber?.phoneNumber) this.emit('code', 'ABCD1234');
+    else this.emit('qr', 'qr-code-test');
     await tick();
     this.emit('authenticated');
     this.emit('ready');
@@ -59,6 +60,24 @@ test('WhatsApp: QR → autenticado → pronto → resolve → envia → ACK → 
   assert.ok(optouts.some(event => event.identities.includes('5511999990001@c.us')));
   FakeClient.instance.emit('disconnected', 'NAVIGATION');
   assert.equal(transport.snapshot().status, 'disconnected');
+  await transport.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('WhatsApp: pareamento por telefone gera código e chega ao estado pronto', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-auto-pairing-'));
+  const states = [];
+  const transport = new WhatsApp(dir, {
+    packageLoader: async () => ({ default: { Client: FakeClient, LocalAuth: FakeLocalAuth } }),
+    qrEncoder: async code => `data:image/png;base64,${code}`,
+  });
+  transport.on('state', state => states.push({ ...state }));
+  await transport.connect({ phoneNumber: '5511999990001' });
+  await tick();
+  assert.equal(FakeClient.instance.options.pairWithPhoneNumber.phoneNumber, '5511999990001');
+  assert.ok(states.some(state => state.status === 'pairing' && state.pairingCode === 'ABCD1234'));
+  assert.equal(transport.snapshot().status, 'ready');
+  assert.equal(transport.snapshot().pairingCode, null);
   await transport.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
