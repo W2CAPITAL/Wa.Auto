@@ -60,3 +60,39 @@ test('reinício preserva concluídas, recupera consultas e nunca repete envio em
   const f=fixture(filename);const id=f.create();const rows=f.store.entries(id);f.store.setCampaign(id,'running');f.store.updateEntry(rows[0].id,{status:'sending'});f.store.updateEntry(rows[1].id,{status:'resolving'});f.store.setMeta('nextSendAt',999999);f.store.close();
   const recovered=new Store(filename);assert.equal(recovered.campaign(id).status,'paused');assert.equal(recovered.entries(id)[0].status,'uncertain');assert.equal(recovered.entries(id)[1].status,'pending');assert.equal(recovered.getMeta('nextSendAt'),'999999');recovered.close();fs.rmSync(dir,{recursive:true,force:true});
 });
+
+
+test('campanha da mesma planilha atualiza o último retorno do processo', async () => {
+  const store=new Store(':memory:');
+  const transport=new TestTransport();
+  let now=Date.parse('2026-09-25T18:00:00.000Z');
+  const cnj='00000000020268260000';
+  const phone='5511999990001';
+  const monitor=store.createLegalMonitor({
+    cnj,
+    clientName:'Cliente Processo',
+    phone,
+    tribunalAlias:'tjsp',
+    mode:'both',
+    notifyWhatsapp:true,
+    lastReturnAt:'2026-09-24T23:59:59.999Z'
+  });
+  const campaignId=store.createCampaign('Retorno carteira',{intervalSeconds:30},[{
+    row:2,
+    name:'Cliente Processo',
+    phone,
+    rawPhone:phone,
+    values:{Cliente:'Cliente Processo',Telefone:phone,Protocolo:cnj},
+    message:'Olá, segue seu retorno.',
+    status:'pending',
+    reason:''
+  }]);
+  const queue=new Queue(store,transport,{autoTick:false,now:()=>now});
+  queue.start(campaignId);
+  await queue.tick();
+  const updated=store.legalMonitor(monitor.id);
+  assert.equal(updated.last_return_at,'2026-09-25T18:00:00.000Z');
+  assert.equal(transport.sent.length,1);
+  await queue.close();
+  store.close();
+});
