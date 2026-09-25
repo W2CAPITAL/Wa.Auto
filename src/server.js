@@ -82,6 +82,7 @@ async function runOneOffReturnFromEnv() {
   const requestId = String(process.env.WA_ONE_OFF_REQUEST_ID || '').trim();
   const cnj = String(process.env.WA_ONE_OFF_CNJ || '').trim();
   const rawPhone = String(process.env.WA_ONE_OFF_PHONE || '').trim();
+  const preferredSource = String(process.env.WA_ONE_OFF_SOURCE || '').trim();
   if (!requestId || !cnj || !rawPhone) return;
 
   const metaKey = 'oneOffReturn:' + requestId;
@@ -107,7 +108,7 @@ async function runOneOffReturnFromEnv() {
   }
 
   try {
-    const result = await legalMonitor.sendOneOffProcessReturn({ cnj, phone, requestId });
+    const result = await legalMonitor.sendOneOffProcessReturn({ cnj, phone, requestId, preferredSource });
     await snapshot.save(dataDir, store);
     console.log(`ONE_OFF_RETURN ${result.status} request=${requestId} cnj=${cnj} source=${result.source || '-'} eventAt=${result.eventAt || '-'} title=${String(result.title || '').replace(/\s+/g,' ').slice(0,300)} messageId=${result.messageId || '-'}`);
   } catch (error) {
