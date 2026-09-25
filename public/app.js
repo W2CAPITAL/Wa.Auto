@@ -179,23 +179,31 @@ onClick('new-campaign', () => {
 function renderConnection() {
   const current = state.connection;
   const ready = current.status === 'ready';
-  const waiting = ['connecting', 'qr', 'authenticated'].includes(current.status);
+  const waiting = ['connecting', 'qr', 'pairing', 'authenticated'].includes(current.status);
   $('connection-dot').className = `status-dot${ready ? ' ready' : waiting ? ' waiting' : ''}`;
   $('connection-label').textContent = !state.online ? 'App sem conexão' : ready ? 'WhatsApp conectado' : waiting ? 'Conectando WhatsApp' : 'WhatsApp desconectado';
   let content;
   if (current.qr) content = `<img src="${escape(current.qr)}" alt="QR Code para conectar o seu WhatsApp">`;
+  else if (current.pairingCode) content = `<div class="pairing-code-box"><span class="eyebrow">CÓDIGO DE PAREAMENTO</span><strong class="pairing-code">${escape(current.pairingCode)}</strong><p class="muted">Digite este código no WhatsApp do celular.</p></div>`;
   else if (ready) content = `<div><div class="connected-avatar">✓</div><p class="connection-account">${escape(current.account?.name)}</p><p class="connection-number">${escape(current.account?.phone ? `+${current.account.phone}` : '')}</p></div>`;
   else if (waiting) content = '<div><span class="loader"></span><p class="muted">Preparando sua conexão…</p></div>';
   else content = '<div><div class="connected-avatar">↗</div><p class="muted">Seu WhatsApp, neste computador.</p></div>';
   const markup = `<div class="qr-container">${content}</div><p class="connection-message">${escape(current.message || 'Conecte seu WhatsApp para começar.')}</p>`;
   if ($('connection-content').innerHTML !== markup) $('connection-content').innerHTML = markup;
   $('connect-action').textContent = ready || waiting ? 'Desconectar' : 'Gerar QR Code';
+  $('pair-action').textContent = current.status === 'pairing' ? 'Gerar outro código' : 'Gerar código de pareamento';
   refreshControls();
 }
 $('connection-open').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
 onClick('connect-action', async () => {
-  const connected = ['ready', 'connecting', 'qr', 'authenticated'].includes(state.connection.status);
+  const connected = ['ready', 'connecting', 'qr', 'pairing', 'authenticated'].includes(state.connection.status);
   state.connection = await api(`/api/whatsapp/${connected ? 'disconnect' : 'connect'}`, { method: 'POST' }); renderConnection();
+});
+onClick('pair-action', async () => {
+  const phone = $('pair-phone').value.trim();
+  if (!phone) throw new Error('Informe seu telefone com DDD para gerar o código.');
+  state.connection = await api('/api/whatsapp/pair', { method: 'POST', body: { phone } });
+  renderConnection();
 });
 onClick('forget-session', async () => {
   if (!confirm('Remover a sessão salva deste computador? Você precisará escanear outro QR Code.')) return;
@@ -266,6 +274,7 @@ function refreshControls() {
   disable('save-campaign', !state.preview || !state.selected.size || state.saved || !state.online);
   disable('test-message', !state.preview || !state.selected.size || !state.online);
   disable('connect-action', !state.online);
+  disable('pair-action', !state.online || state.connection.status === 'ready');
   disable('forget-session', !state.online);
   if (state.detail) {
     const campaign = state.detail.campaign;
