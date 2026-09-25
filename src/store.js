@@ -33,6 +33,15 @@ export class Store {
         last_event_hash TEXT,
         last_event_source TEXT,
         last_event_text TEXT,
+        last_return_at TEXT,
+        next_return_at TEXT,
+        sheet_movement_at TEXT,
+        sheet_movement_text TEXT NOT NULL DEFAULT '',
+        last_notified_at TEXT,
+        last_notified_hash TEXT,
+        source_import_id TEXT,
+        source_sheet TEXT,
+        source_row INTEGER,
         error TEXT NOT NULL DEFAULT ''
       );
       CREATE UNIQUE INDEX IF NOT EXISTS legal_monitor_unique ON legal_monitors(cnj,phone);
@@ -53,6 +62,15 @@ export class Store {
       CREATE UNIQUE INDEX IF NOT EXISTS legal_event_unique ON legal_events(monitor_id,event_hash);
       CREATE INDEX IF NOT EXISTS legal_events_pending ON legal_events(send_status,event_at);
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+    const legalColumns = new Set(this.db.prepare('PRAGMA table_info(legal_monitors)').all().map(row => row.name));
+    const legalMigrations = [
+      ['last_return_at','TEXT'], ['next_return_at','TEXT'], ['sheet_movement_at','TEXT'],
+      ['sheet_movement_text',"TEXT NOT NULL DEFAULT ''"], ['last_notified_at','TEXT'], ['last_notified_hash','TEXT'],
+      ['source_import_id','TEXT'], ['source_sheet','TEXT'], ['source_row','INTEGER']
+    ];
+    for (const [name, definition] of legalMigrations) {
+      if (!legalColumns.has(name)) this.db.exec('ALTER TABLE legal_monitors ADD COLUMN ' + name + ' ' + definition);
+    }
     this.db.prepare("UPDATE campaigns SET status='paused',reason='Aplicativo reiniciado. Confira o histórico antes de continuar.' WHERE status='running'").run();
     this.db.prepare("UPDATE recipients SET status='uncertain',reason='O aplicativo fechou durante o envio. Confira a conversa; não haverá reenvio automático.' WHERE status='sending'").run();
     this.db.prepare("UPDATE recipients SET status='pending' WHERE status='resolving'").run();
