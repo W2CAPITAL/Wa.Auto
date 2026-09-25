@@ -13,8 +13,8 @@
     "test:browser": "node tests/browser.smoke.js",
     "check": "node scripts/check.js",
     "verify": "npm run check && npm test",
-    "test:hosted": "node tests/browser.hosted.js",
-    "start:cloud": "WA_HOSTED=1 node --env-file-if-exists=.env src/server.js"
+    "start:cloud": "WA_HOSTED=1 node --env-file-if-exists=.env src/server.js",
+    "test:baileys-live": "node tests/baileys-live-smoke.js"
   },
   "dependencies": {
     "csv-parse": "7.0.2",
