@@ -499,6 +499,7 @@ function renderLegal() {
   $('legal-stat-last').textContent = stats.lastScan ? legalDate(stats.lastScan, true) : '—';
   $('legal-last-scan').textContent = stats.busy ? 'Verificando agora…' : stats.lastScan ? `Última: ${legalDate(stats.lastScan)}` : 'Ainda não verificado';
   $('legal-alert-count').textContent = stats.alerts ? number(stats.alerts) : '';
+  if ($('mobile-legal-alert-count')) $('mobile-legal-alert-count').textContent = stats.alerts ? number(stats.alerts) : '';
 
   const monitors = state.legalData.monitors || [];
   $('legal-monitor-list').innerHTML = monitors.length ? monitors.map(monitor => `
@@ -605,12 +606,15 @@ async function renderBlocked() {
 $('block-form').addEventListener('submit', event => { event.preventDefault(); void perform(event.submitter, async () => { await api('/api/suppressions', { method: 'POST', body: { phone: $('block-phone').value, reason: $('block-reason').value } }); $('block-phone').value = ''; $('block-reason').value = ''; await renderBlocked(); toast('Telefone adicionado à lista.'); }); });
 function showPage(page, activeButton = null) {
   for (const section of document.querySelectorAll('main>.page')) section.classList.toggle('hidden', section.id !== `page-${page}`);
-  for (const nav of document.querySelectorAll('.sidebar-nav .nav-item')) nav.classList.toggle('active', nav === activeButton);
+  const sideTarget = activeButton?.closest?.('.sidebar-nav') ? activeButton : document.querySelector(`.sidebar-nav [data-page="${page}"]`);
+  for (const nav of document.querySelectorAll('.sidebar-nav .nav-item')) nav.classList.toggle('active', nav === sideTarget);
+  for (const nav of document.querySelectorAll('.mobile-nav [data-page]')) nav.classList.toggle('active', nav.dataset.page === page);
   if (page === 'blocked') void perform(null, renderBlocked);
   if (page === 'processes') void perform(null, loadLegal);
 }
-for (const button of document.querySelectorAll('[data-page]')) button.addEventListener('click', () => showPage(button.dataset.page, button.closest('.sidebar-nav') ? button : null));
+for (const button of document.querySelectorAll('[data-page]')) button.addEventListener('click', () => showPage(button.dataset.page, button));
 $('nav-whatsapp').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
+$('mobile-whatsapp').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
 $('nav-clients').addEventListener('click', () => { showPage('campaigns', $('nav-clients')); $('clients-section').scrollIntoView({ behavior:'smooth', block:'start' }); });
 $('nav-history').addEventListener('click', () => { showPage('campaigns', $('nav-history')); $('history-section').scrollIntoView({ behavior:'smooth', block:'start' }); });
 $('top-help').addEventListener('click', () => showPage('help'));
