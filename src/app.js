@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { parseSpreadsheet } from './importer.js';
-import { createCampaign, prepareCampaign, csvReport } from './campaigns.js';
+import { analyzeContacts, createCampaign, prepareCampaign, csvReport } from './campaigns.js';
 import { normalizePhone } from './phone.js';
 import { AppError, requireValue } from './errors.js';
 
@@ -69,6 +69,15 @@ export function createApp({ store, transport, queue, onMutation = () => {} }) {
     res.status(201).json(metadata({ id, ...imported }));
   });
   app.get('/api/imports/:id', (req, res) => res.json(metadata(store.getImport(req.params.id))));
+  app.get('/api/imports/:id/contacts', (req, res) => {
+    res.json(analyzeContacts(store, {
+      importId: req.params.id,
+      sheet: req.query.sheet,
+      phoneColumn: req.query.phoneColumn,
+      nameColumn: req.query.nameColumn || '',
+      country: req.query.country || '55',
+    }));
+  });
   app.get('/api/imports/:id/values', (req, res) => {
     const imported = store.getImport(req.params.id);
     const sheet = imported.sheets.find(sheet => sheet.name === req.query.sheet);
