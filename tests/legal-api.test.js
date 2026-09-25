@@ -59,19 +59,21 @@ test('API jurídica: cadastrar, criar baseline, detectar novidade, enviar e impo
   assert.ok(list.events.some(event=>event.send_status==='sent'));
 
   const form=new FormData();
-  form.append('file',new Blob([`Cliente;Telefone;Processo\nBruno;21999990002;${cnj}\nSem processo;11900000000;\n`]),'processos.csv');
+  form.append('file',new Blob([`Cliente;Telefone;Processo;Autorizado;Observacoes\nBruno;21999990002;${cnj};sim;\nSem processo;11900000000;;sim;\nBloqueado;31999990003;00000010020268260000;sim;NÃO FALAR\nSem consentimento;41999990004;00000020020268260000;nao;\n`]),'processos.csv');
   const upload=await fetch(`${base}/api/imports`,{method:'POST',headers:{'X-WA-CSRF':boot.csrfToken},body:form});
   assert.equal(upload.status,201);
   const imported=await upload.json();
 
   const importedMonitors=await fetch(`${base}/api/legal/monitors/import`,{
     method:'POST',headers,
-    body:JSON.stringify({importId:imported.id,sheet:'Contatos',processColumn:'Processo',phoneColumn:'Telefone',nameColumn:'Cliente',mode:'datajud',notifyWhatsapp:true})
+    body:JSON.stringify({importId:imported.id,sheet:'Contatos',processColumn:'Processo',phoneColumn:'Telefone',nameColumn:'Cliente',consentColumn:'Autorizado',mode:'datajud',notifyWhatsapp:true})
   });
   assert.equal(importedMonitors.status,201);
   const importedResult=await importedMonitors.json();
   assert.equal(importedResult.created,1);
   assert.equal(importedResult.invalid,1);
+  assert.equal(importedResult.blocked,1);
+  assert.equal(importedResult.withoutConsent,1);
   assert.equal(store.legalMonitors().length,2);
 
   const duplicateScan=await (await fetch(`${base}/api/legal/monitors/${created.monitor.id}/scan`,{method:'POST',headers,body:'{}'})).json();
