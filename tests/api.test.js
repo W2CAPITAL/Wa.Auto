@@ -19,6 +19,20 @@ test('API: upload → revisão → rascunho → início → confirmação → re
   });
   assert.equal(foreignHostStatus,403);
   assert.equal((await fetch(`${base}/api/bootstrap`,{headers:{Origin:'https://evil.example'}})).status,403);
+  const cloud = await fetch(`${base}/api/bootstrap`, { headers: { Origin: 'https://whatsappautomat.vercel.app' } });
+  assert.equal(cloud.status, 200);
+  assert.equal(cloud.headers.get('access-control-allow-origin'), 'https://whatsappautomat.vercel.app');
+  const preflight = await fetch(`${base}/api/imports`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'https://whatsappautomat.vercel.app',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type,x-wa-csrf',
+      'Access-Control-Request-Private-Network': 'true'
+    }
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
   const form=new FormData();form.append('file',new Blob(['Cliente;Telefone\nAna;11999990001\n']), 'clientes.csv');
   const upload=await fetch(`${base}/api/imports`,{method:'POST',headers:{'X-WA-CSRF':boot.csrfToken},body:form});assert.equal(upload.status,201);const imported=await upload.json();
   const input={importId:imported.id,sheet:'Contatos',phoneColumn:'Telefone',nameColumn:'Cliente',template:'Olá, {{Cliente}}!',name:'Atendimento',intervalSeconds:10};
