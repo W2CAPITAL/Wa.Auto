@@ -10,11 +10,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: WA_HOSTED
-        value: "1"
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_ANON_KEY
+      - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
       - key: WA_DB_SECRET
         sync: false
