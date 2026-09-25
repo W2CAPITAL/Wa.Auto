@@ -187,7 +187,8 @@ export class LegalMonitorService {
     fetchImpl = fetch,
     onMutation = () => {},
     scanIntervalMs = 30 * 60 * 1000,
-    minTriggerIntervalMs = 20 * 60 * 1000
+    minTriggerIntervalMs = 20 * 60 * 1000,
+    sendDelayMs = 5000
   } = {}) {
     this.store = store;
     this.transport = transport;
@@ -195,6 +196,7 @@ export class LegalMonitorService {
     this.onMutation = onMutation;
     this.scanIntervalMs = scanIntervalMs;
     this.minTriggerIntervalMs = minTriggerIntervalMs;
+    this.sendDelayMs = Math.max(0, Number(sendDelayMs) || 0);
     this.busy = false;
     this.timer = null;
   }
@@ -322,7 +324,7 @@ export class LegalMonitorService {
         this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
         sent++;
         this.onMutation();
-        await sleep(5000);
+        if (this.sendDelayMs) await sleep(this.sendDelayMs);
       } catch (error) {
         this.store.markLegalEvent(event.id, { sendStatus:'failed', error:String(error?.message || 'Falha no envio').slice(0,500) });
         failed++;
