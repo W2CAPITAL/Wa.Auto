@@ -1,12 +1,10 @@
 const $ = id => document.getElementById(id);
-const HOSTED_MODE = !['127.0.0.1', 'localhost'].includes(location.hostname);
-const API_ORIGIN = HOSTED_MODE ? 'http://127.0.0.1:3210' : '';
-const apiUrl = url => `${API_ORIGIN}${url}`;
+const apiUrl = url => url;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const labels = { draft: 'Rascunho', running: 'Em andamento', paused: 'Pausada', completed: 'Concluída', cancelled: 'Cancelada', pending: 'Pronta para enviar', resolving: 'Conferindo número', sending: 'Enviando', sent: 'Enviada', delivered: 'Entregue', read: 'Lida', uncertain: 'Conferir no WhatsApp', invalid: 'Revisar dados', duplicate: 'Repetido', skipped: 'Não contatar', excluded: 'Não selecionado', failed_delivery: 'Falha de entrega' };
 const badge = status => `<span class="badge ${escape(status)}">${escape(labels[status] || status)}</span>`;
 const number = value => Number(value || 0).toLocaleString('pt-BR');
-const state = { token: '', imported: null, connection: { status: 'disconnected', message: 'Motor local desligado.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: !HOSTED_MODE, engineAvailable: !HOSTED_MODE };
+const state = { token: '', imported: null, connection: { status: 'disconnected', message: 'Conecte seu WhatsApp para começar.' }, campaigns: [], preview: null, selected: new Set(), reviewPage: 0, detailPage: 0, activeId: null, detail: null, saved: false, online: true };
 const PAGE_SIZE = 25;
 let toastTimer;
 
@@ -16,27 +14,19 @@ function toast(message, error = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => $('toast').classList.add('hidden'), error ? 7000 : 4200);
 }
-function requireEngine() {
-  if (HOSTED_MODE && !state.engineAvailable) throw new Error('O motor local está desligado. Abra o WA.Auto para Windows e depois clique em Conectar motor.');
-}
 async function api(url, options = {}) {
-  if (HOSTED_MODE && !state.engineAvailable && !options.allowOfflineProbe) requireEngine();
   const headers = { ...options.headers };
   if (options.body && !(options.body instanceof FormData)) { headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(options.body); }
   if (options.method && options.method !== 'GET') headers['X-WA-CSRF'] = state.token;
   let response;
   try {
-    const { allowOfflineProbe, ...fetchOptions } = options;
     response = await fetch(apiUrl(url), {
-      ...fetchOptions,
+      ...options,
       headers,
       cache: 'no-store',
-      ...(HOSTED_MODE ? { targetAddressSpace: 'local' } : {}),
     });
   } catch {
-    throw new Error(HOSTED_MODE
-      ? 'O painel abriu, mas o motor local não respondeu. Abra INICIAR-WINDOWS.cmd neste computador, permita o acesso à rede local no Chrome e tente novamente.'
-      : 'O WA.Auto não respondeu. Confira se a janela do programa continua aberta.');
+    throw new Error('O serviço WA.Auto não respondeu. Aguarde alguns segundos e tente novamente.');
   }
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Não foi possível concluir.');
@@ -186,28 +176,21 @@ function renderConnection() {
   const ready = current.status === 'ready';
   const waiting = ['connecting', 'qr', 'pairing', 'authenticated'].includes(current.status);
   $('connection-dot').className = `status-dot${ready ? ' ready' : waiting ? ' waiting' : ''}`;
-  $('connection-label').textContent = HOSTED_MODE && !state.engineAvailable ? 'Motor local desligado' : !state.online ? 'App sem conexão' : ready ? 'WhatsApp conectado' : waiting ? 'Conectando WhatsApp' : 'WhatsApp desconectado';
+  $('connection-label').textContent = !state.online ? 'Serviço indisponível' : ready ? 'WhatsApp conectado' : waiting ? 'Conectando WhatsApp' : 'WhatsApp desconectado';
   let content;
-  if (HOSTED_MODE && !state.engineAvailable) content = '<div><div class="connected-avatar">!</div><p class="muted">O painel web está aberto, mas o motor do WhatsApp não está rodando neste PC.</p><p class="muted">1. Baixe o iniciador.<br>2. Execute no Windows.<br>3. Volte aqui e clique em Conectar motor.</p><a class="button secondary" href="/INICIAR-WA.AUTO.cmd" download>Baixar iniciador Windows ↓</a></div>';
-  else if (current.qr) content = `<img src="${escape(current.qr)}" alt="QR Code para conectar o seu WhatsApp">`;
+  if (current.qr) content = `<img src="${escape(current.qr)}" alt="QR Code para conectar o seu WhatsApp">`;
   else if (current.pairingCode) content = `<div class="pairing-code-box"><span class="eyebrow">CÓDIGO DE PAREAMENTO</span><strong class="pairing-code">${escape(current.pairingCode)}</strong><p class="muted">Digite este código no WhatsApp do celular.</p></div>`;
   else if (ready) content = `<div><div class="connected-avatar">✓</div><p class="connection-account">${escape(current.account?.name)}</p><p class="connection-number">${escape(current.account?.phone ? `+${current.account.phone}` : '')}</p></div>`;
   else if (waiting) content = '<div><span class="loader"></span><p class="muted">Preparando sua conexão…</p></div>';
-  else content = '<div><div class="connected-avatar">↗</div><p class="muted">Seu WhatsApp, neste computador.</p></div>';
+  else content = '<div><div class="connected-avatar">↗</div><p class="muted">Seu WhatsApp conectado ao WA.Auto na nuvem.</p></div>';
   const markup = `<div class="qr-container">${content}</div><p class="connection-message">${escape(current.message || 'Conecte seu WhatsApp para começar.')}</p>`;
   if ($('connection-content').innerHTML !== markup) $('connection-content').innerHTML = markup;
-  $('connect-action').textContent = HOSTED_MODE && !state.engineAvailable ? 'Conectar motor' : ready || waiting ? 'Desconectar' : 'Gerar QR Code';
+  $('connect-action').textContent = ready || waiting ? 'Desconectar' : 'Gerar QR Code';
   $('pair-action').textContent = current.status === 'pairing' ? 'Gerar outro código' : 'Gerar código de pareamento';
-  $('pair-action').disabled = HOSTED_MODE && !state.engineAvailable;
-  $('forget-session').disabled = HOSTED_MODE && !state.engineAvailable;
   refreshControls();
 }
 $('connection-open').addEventListener('click', () => { renderConnection(); modal('connection-dialog'); });
 onClick('connect-action', async () => {
-  if (HOSTED_MODE && !state.engineAvailable) {
-    await connectEngine();
-    if (!state.engineAvailable) return;
-  }
   const connected = ['ready', 'connecting', 'qr', 'pairing', 'authenticated'].includes(state.connection.status);
   state.connection = await api(`/api/whatsapp/${connected ? 'disconnect' : 'connect'}`, { method: 'POST' }); renderConnection();
 });
@@ -218,7 +201,7 @@ onClick('pair-action', async () => {
   renderConnection();
 });
 onClick('forget-session', async () => {
-  if (!confirm('Remover a sessão salva deste computador? Você precisará escanear outro QR Code.')) return;
+  if (!confirm('Remover a sessão salva na nuvem? Você precisará escanear outro QR Code.')) return;
   state.connection = await api('/api/whatsapp/logout', { method: 'POST' }); renderConnection();
 });
 
@@ -285,9 +268,9 @@ function refreshControls() {
   disable('review', !state.imported || !$('phone-column').value || !$('template').value.trim() || !state.online);
   disable('save-campaign', !state.preview || !state.selected.size || state.saved || !state.online);
   disable('test-message', !state.preview || !state.selected.size || !state.online);
-  disable('connect-action', !state.online && !(HOSTED_MODE && !state.engineAvailable));
-  disable('pair-action', !state.online || state.connection.status === 'ready' || (HOSTED_MODE && !state.engineAvailable));
-  disable('forget-session', !state.online || (HOSTED_MODE && !state.engineAvailable));
+  disable('connect-action', !state.online);
+  disable('pair-action', !state.online || state.connection.status === 'ready');
+  disable('forget-session', !state.online);
   if (state.detail) {
     const campaign = state.detail.campaign;
     const canStart = ['draft', 'paused'].includes(campaign.status) && campaign.counts.pending > 0;
@@ -340,68 +323,33 @@ for (const button of document.querySelectorAll('[data-page]')) button.addEventLi
 let polling = false;
 let pollTimer = null;
 
-function hostedOfflineBanner(message = 'Motor local desligado.') {
-  const banner = $('global-error');
-  banner.className = 'info';
-  banner.innerHTML = `${escape(message)} <strong>Para usar planilhas e WhatsApp:</strong> <a href="/INICIAR-WA.AUTO.cmd" download>baixe e execute o iniciador Windows</a> e depois <button class="text-link" id="retry-engine">Conectar motor</button>.`;
-  $('retry-engine')?.addEventListener('click', () => void perform($('retry-engine'), connectEngine));
-}
-
-async function connectEngine() {
-  if (!HOSTED_MODE) return true;
+async function poll() {
+  if (polling) return;
+  polling = true;
   try {
-    const response = await api('/api/bootstrap', { allowOfflineProbe: true });
-    state.engineAvailable = true;
+    const response = await api('/api/state');
     state.online = true;
-    state.token = response.csrfToken;
     state.connection = response.connection;
     state.campaigns = response.campaigns;
     $('global-error').classList.add('hidden');
     renderConnection();
     renderHistory();
-    const draft = getDraft();
-    if (response.latestImport) {
-      const imported = await api(`/api/imports/${response.latestImport.id}`);
-      setImport(imported, draft.importId === imported.id ? draft : {});
-    }
-    if (!pollTimer) pollTimer = setInterval(() => void poll(), 2000);
-    toast('Motor local conectado.');
-    return true;
-  } catch {
-    state.engineAvailable = false;
-    state.online = false;
-    state.connection = { status: 'disconnected', message: 'Motor local desligado.' };
-    hostedOfflineBanner('Não encontrei o motor em 127.0.0.1:3210.');
-    renderConnection();
-    return false;
-  }
-}
-
-async function poll() {
-  if (polling || (HOSTED_MODE && !state.engineAvailable)) return;
-  polling = true;
-  try {
-    const response = await api('/api/state');
-    state.online = true; state.engineAvailable = true; state.connection = response.connection; state.campaigns = response.campaigns;
-    $('global-error').classList.add('hidden');
-    renderConnection(); renderHistory();
     if ($('campaign-dialog').open && state.activeId) {
       const id = state.activeId;
       const detail = await api(`/api/campaigns/${id}`);
-      if (id === state.activeId) { state.detail = detail; renderDetail(); }
+      if (id === state.activeId) {
+        state.detail = detail;
+        renderDetail();
+      }
     }
   } catch (error) {
     state.online = false;
-    if (HOSTED_MODE) {
-      state.engineAvailable = false;
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      hostedOfflineBanner('O motor local foi encerrado.');
-    } else {
-      $('global-error').textContent = error.message;
-      $('global-error').classList.remove('hidden');
-    }
+    $('global-error').textContent = error.message;
+    $('global-error').classList.remove('hidden');
     renderConnection();
-  } finally { polling = false; }
+  } finally {
+    polling = false;
+  }
 }
 
 async function init() {
@@ -412,26 +360,18 @@ async function init() {
   $('country').value = draft.country || '55';
   renderMessage();
 
-  if (HOSTED_MODE) {
-    document.documentElement.dataset.hosted = 'true';
-    const localDot = document.querySelector('.sidebar-bottom .local-dot');
-    if (localDot) localDot.innerHTML = '<span></span> Painel web · motor no PC';
-    state.online = false;
-    state.engineAvailable = false;
-    hostedOfflineBanner('Painel carregado. O motor local ainda não está conectado.');
-    renderConnection();
-    renderHistory();
-    refreshControls();
-    return;
-  }
-
   const response = await api('/api/bootstrap');
-  state.token = response.csrfToken; state.connection = response.connection; state.campaigns = response.campaigns;
-  renderConnection(); renderHistory();
+  state.token = response.csrfToken;
+  state.connection = response.connection;
+  state.campaigns = response.campaigns;
+  renderConnection();
+  renderHistory();
+
   if (response.latestImport) {
     const imported = await api(`/api/imports/${response.latestImport.id}`);
     setImport(imported, draft.importId === imported.id ? draft : {});
   }
+
   refreshControls();
   pollTimer = setInterval(() => void poll(), 2000);
 }
