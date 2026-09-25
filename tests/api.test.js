@@ -33,6 +33,10 @@ test('API: upload → revisão → rascunho → início → confirmação → re
   });
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
+  assert.equal((await fetch(`${base}/api/whatsapp/pair`, { method: 'POST', headers, body: '{}' })).status, 400);
+  const pair = await fetch(`${base}/api/whatsapp/pair`, { method: 'POST', headers, body: '{"phone":"11999990001"}' });
+  assert.equal(pair.status, 200);
+  assert.equal(transport.lastConnectOptions.phoneNumber, '5511999990001');
   const form=new FormData();form.append('file',new Blob(['Cliente;Telefone\nAna;11999990001\n']), 'clientes.csv');
   const upload=await fetch(`${base}/api/imports`,{method:'POST',headers:{'X-WA-CSRF':boot.csrfToken},body:form});assert.equal(upload.status,201);const imported=await upload.json();
   const input={importId:imported.id,sheet:'Contatos',phoneColumn:'Telefone',nameColumn:'Cliente',template:'Olá, {{Cliente}}!',name:'Atendimento',intervalSeconds:10};
