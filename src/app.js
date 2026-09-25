@@ -7,10 +7,11 @@ import { parseSpreadsheet } from './importer.js';
 import { analyzeContacts, createCampaign, prepareCampaign, csvReport } from './campaigns.js';
 import { normalizePhone } from './phone.js';
 import { AppError, requireValue } from './errors.js';
+import { normalizeCnj, resolveDataJudAlias } from './legal-monitor.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
-export function createApp({ store, transport, queue, onMutation = () => {} }) {
+export function createApp({ store, transport, queue, legalMonitor = null, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
@@ -50,8 +51,8 @@ export function createApp({ store, transport, queue, onMutation = () => {} }) {
     next();
   });
   app.get('/api/health', (req, res) => res.json({ ok: true, service: 'WA.Auto', pid: process.pid, uptime: Math.floor(process.uptime()) }));
-  app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0) }));
-  app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy }));
+  app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), legal: legalMonitor?.snapshot?.() || store.legalStats() }));
+  app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy, legal: legalMonitor?.snapshot?.() || store.legalStats() }));
   app.post('/api/whatsapp/connect', async (req, res) => { await transport.connect(); res.json(transport.snapshot()); });
   app.post('/api/whatsapp/pair', async (req, res) => {
     const { phone, error } = normalizePhone(req.body?.phone, '55');
@@ -123,6 +124,77 @@ export function createApp({ store, transport, queue, onMutation = () => {} }) {
     queue.start(id);
     res.status(201).json(store.campaign(id));
   });
+  app.get('/api/legal/monitors', (req, res) => {
+    res.json({ monitors: store.legalMonitors(), events: store.legalEvents(null, 250), stats: legalMonitor?.snapshot?.() || store.legalStats() });
+  });
+  app.get('/api/legal/monitors/:id/events', (req, res) => res.json(store.legalEvents(req.params.id, 250)));
+  app.post('/api/legal/monitors', async (req, res) => {
+    requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
+    const cnj = normalizeCnj(req.body?.cnj);
+    requireValue(cnj, 'Informe um número CNJ válido com 20 dígitos.');
+    const { phone, error } = normalizePhone(req.body?.phone, '55');
+    requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
+    requireValue(!store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`), 'Este telefone está na lista de não contatar.');
+    const mode = ['datajud','djen','both'].includes(req.body?.mode) ? req.body.mode : 'both';
+    const monitor = store.createLegalMonitor({
+      cnj,
+      clientName:String(req.body?.clientName || 'Cliente').trim().slice(0,160) || 'Cliente',
+      phone,
+      tribunalAlias:resolveDataJudAlias(cnj),
+      mode,
+      notifyWhatsapp:req.body?.notifyWhatsapp !== false
+    });
+    const scan = await legalMonitor.scanOne(monitor, { seedOnly:true });
+    res.status(201).json({ monitor:store.legalMonitor(monitor.id), scan, events:store.legalEvents(monitor.id, 20) });
+  });
+  app.post('/api/legal/monitors/import', async (req, res) => {
+    requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
+    const imported = store.getImport(req.body?.importId);
+    const sheet = imported.sheets.find(item => item.name === req.body?.sheet);
+    requireValue(sheet, 'Selecione uma aba válida.');
+    requireValue(sheet.headers.includes(req.body?.processColumn), 'Selecione a coluna do processo.');
+    requireValue(sheet.headers.includes(req.body?.phoneColumn), 'Selecione a coluna de telefone.');
+    const nameColumn = sheet.headers.includes(req.body?.nameColumn) ? req.body.nameColumn : '';
+    let created = 0, invalid = 0, blocked = 0;
+    const ids = [];
+    for (const row of sheet.rows) {
+      const cnj = normalizeCnj(row.values[req.body.processColumn]);
+      const { phone } = normalizePhone(row.values[req.body.phoneColumn], '55');
+      if (!cnj || !phone) { invalid++; continue; }
+      if (store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { blocked++; continue; }
+      const monitor = store.createLegalMonitor({
+        cnj,
+        clientName:String(nameColumn ? row.values[nameColumn] || 'Cliente' : 'Cliente').trim().slice(0,160) || 'Cliente',
+        phone,
+        tribunalAlias:resolveDataJudAlias(cnj),
+        mode:['datajud','djen','both'].includes(req.body?.mode) ? req.body.mode : 'both',
+        notifyWhatsapp:req.body?.notifyWhatsapp !== false
+      });
+      ids.push(monitor.id); created++;
+    }
+    res.status(201).json({ created, invalid, blocked, monitors:ids });
+  });
+  app.post('/api/legal/monitors/:id/toggle', (req, res) => {
+    const current = store.legalMonitor(req.params.id);
+    res.json(store.updateLegalMonitor(req.params.id, {
+      enabled:req.body?.enabled == null ? !current.enabled : !!req.body.enabled,
+      notify_whatsapp:req.body?.notifyWhatsapp == null ? current.notify_whatsapp : !!req.body.notifyWhatsapp
+    }));
+  });
+  app.delete('/api/legal/monitors/:id', (req, res) => { store.deleteLegalMonitor(req.params.id); res.json({ ok:true }); });
+  app.post('/api/legal/scan', async (req, res) => {
+    requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
+    res.json(await legalMonitor.trigger({ force:true }));
+  });
+  app.post('/api/legal/monitors/:id/scan', async (req, res) => {
+    requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
+    res.json(await legalMonitor.scanOne(req.params.id));
+  });
+  app.get('/api/legal/cron', async (req, res) => {
+    requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
+    res.json(await legalMonitor.trigger({ force:false }));
+  });
+
   app.get('/api/suppressions', (req, res) => res.json(store.suppressions()));
   app.post('/api/suppressions', (req, res) => {
     const { phone, error } = normalizePhone(req.body.phone);
