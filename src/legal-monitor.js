@@ -276,8 +276,9 @@ export class LegalMonitorService {
         this.store.recordLegalEvent({ monitorId:monitor.id, eventHash:event.hash, source:event.source, title:event.title, details:event.details || '', eventAt:event.eventAt, sendStatus:'baseline' });
         continue;
       }
-      const isNewer = event.eventAt > (monitor.last_event_at || '');
-      if (!isNewer) continue;
+      // Depois da linha de base, a identidade do evento (hash) é a fonte de verdade.
+      // Isso também captura movimentações que o tribunal publica com atraso e cuja
+      // data oficial pode ser anterior ao último check.
       this.store.recordLegalEvent({ monitorId:monitor.id, eventHash:event.hash, source:event.source, title:event.title, details:event.details || '', eventAt:event.eventAt, sendStatus:'waiting' });
       newEvents++;
     }
@@ -316,7 +317,8 @@ export class LegalMonitorService {
           failed++;
           continue;
         }
-        const result = await this.transport.send(jid, formatProcessMessage(event, event));
+        const monitor = { cnj:event.cnj, client_name:event.client_name, phone:event.phone };
+        const result = await this.transport.send(jid, formatProcessMessage(monitor, event));
         this.store.markLegalEvent(event.id, { sendStatus:'sent', messageId:result?.id || null });
         sent++;
         this.onMutation();
