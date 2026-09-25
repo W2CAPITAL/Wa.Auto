@@ -37,6 +37,8 @@ test('API: upload → revisão → rascunho → início → confirmação → re
   assert.equal(transport.lastConnectOptions.phoneNumber, '5511999990001');
   const form=new FormData();form.append('file',new Blob(['Cliente;Telefone\nAna;11999990001\n']), 'clientes.csv');
   const upload=await fetch(`${base}/api/imports`,{method:'POST',headers:{'X-WA-CSRF':boot.csrfToken},body:form});assert.equal(upload.status,201);const imported=await upload.json();
+  const contacts=await (await fetch(`${base}/api/imports/${imported.id}/contacts?${new URLSearchParams({sheet:'Contatos',phoneColumn:'Telefone',nameColumn:'Cliente',country:'55'})}`)).json();
+  assert.equal(contacts.counts.total,1);assert.equal(contacts.counts.valid,1);assert.equal(contacts.entries[0].name,'Ana');assert.equal(contacts.entries[0].phone,'5511999990001');
   const input={importId:imported.id,sheet:'Contatos',phoneColumn:'Telefone',nameColumn:'Cliente',template:'Olá, {{Cliente}}!',name:'Atendimento',intervalSeconds:10};
   const preview=await (await fetch(`${base}/api/preview`,{method:'POST',headers,body:JSON.stringify(input)})).json();assert.equal(preview.counts.pending,1);
   const campaign=await (await fetch(`${base}/api/campaigns`,{method:'POST',headers,body:JSON.stringify(input)})).json();assert.equal(campaign.status,'draft');
