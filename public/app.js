@@ -503,7 +503,7 @@ function legalDate(value, compact = false) {
   return compact ? date.toLocaleDateString('pt-BR') : date.toLocaleString('pt-BR');
 }
 function legalStatusLabel(event) {
-  return ({ waiting:'Aguardando WhatsApp', sent:'Enviado', failed:'Falhou', blocked:'Não contatar', baseline:'Linha de base' })[event.send_status] || event.send_status;
+  return ({ waiting:'Após último retorno', sending:'Enviando', sent:'Enviado', failed:'Falhou', uncertain:'Sem confirmação', blocked:'Não contatar', baseline:'Linha de base', covered_by_return:'Já coberto no retorno' })[event.send_status] || event.send_status;
 }
 function renderLegal() {
   if (!$('legal-stat-monitored')) return;
