@@ -8,6 +8,7 @@ import { analyzeContacts, createCampaign, prepareCampaign, csvReport } from './c
 import { affirmative, blockedInRow, normalizePhone, fold } from './phone.js';
 import { AppError, requireValue } from './errors.js';
 import { normalizeCnj, resolveDataJudAlias, parseClientDate } from './legal-monitor.js';
+import { registerDossierRoutes } from './dossier-routes.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
@@ -58,6 +59,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     next();
   });
   app.use(express.json({ limit: '2mb' }));
+  registerDossierRoutes(app);
   app.use((req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.path.startsWith('/api/')) {
       res.on('finish', () => { if (res.statusCode < 500) onMutation(); });
