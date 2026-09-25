@@ -32,10 +32,12 @@ try {
 
   // Login alternative: phone pairing code path reaches the backend and can disconnect again.
   await page.click('#connection-open');
+  await page.click('#connection-tab-phone');
   await page.type('#pair-phone', '11999990001');
   await page.click('#pair-action');
   await page.waitForFunction(() => document.getElementById('connection-label').textContent.includes('conectado'));
   assert.equal(transport.lastConnectOptions.phoneNumber, '5511999990001');
+  await page.click('#connection-tab-qr');
   await page.click('#connect-action');
   await page.waitForFunction(() => document.getElementById('connection-label').textContent.includes('desconectado'));
   await page.click('[data-close="connection-dialog"]');
@@ -53,6 +55,14 @@ try {
   assert.match(await page.$eval('#import-contact-rows', el => el.textContent), /Ana Exemplo/);
   assert.match(await page.$eval('#import-contact-rows', el => el.textContent), /Bruno Exemplo/);
   assert.match(await page.$eval('#send-all-valid', el => el.textContent), /Enviar para todos os 2 válidos/);
+  await page.click('#contact-tab-valid');
+  assert.equal(await page.$eval('#import-contact-rows tr', rows => rows.length), 2);
+  await page.click('#contact-tab-all');
+  await page.type('#global-search', 'Bruno');
+  await page.waitForFunction(() => document.getElementById('import-contact-rows').textContent.includes('Bruno Exemplo'));
+  assert.doesNotMatch(await page.$eval('#import-contact-rows', el => el.textContent), /Ana Exemplo/);
+  await page.click('#global-search', { clickCount: 3 });
+  await page.keyboard.press('Backspace');
   await page.type('#campaign-name', 'Acompanhamento de clientes');
   await page.click('#sample-template');
   await page.click('#review');
