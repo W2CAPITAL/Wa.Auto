@@ -1,6 +1,6 @@
 # WA.Auto Cloud
 
-**Excel/CSV → revisão → WhatsApp → fila de envio.**
+**Excel/CSV → revisão → WhatsApp → fila de envio · DataJud/DJEN → atualização processual → WhatsApp.**
 
 O WA.Auto foi refatorado para operar como serviço **100% hospedado**. O navegador do usuário não chama `127.0.0.1`, não depende de aplicativo Windows e não precisa deixar um PC ligado.
 
@@ -13,6 +13,7 @@ Navegador
 WA.Auto Cloud (Node.js / Render)
    ├─ painel web + API
    ├─ fila de campanhas
+   ├─ monitor DataJud + DJEN
    ├─ conexão WhatsApp WebSocket (Baileys)
    └─ cache SQLite da instância
           │ snapshot seguro
@@ -59,6 +60,36 @@ Nenhuma mensagem é disparada apenas por importar a planilha ou salvar um rascun
 - Relatório CSV por campanha.
 - Recuperação segura após reinício do serviço.
 
+## Monitoramento processual — DataJud + DJEN
+
+O menu **Processos** permite cadastrar manualmente ou importar da planilha uma carteira com:
+
+- número CNJ do processo;
+- nome do cliente;
+- telefone/WhatsApp;
+- fonte: DataJud, DJEN ou ambas;
+- autorização para aviso automático.
+
+### Regra de atualização
+
+1. O primeiro scan cria uma **linha de base** e não envia movimentações antigas.
+2. Nas consultas seguintes, eventos inéditos são deduplicados por identidade/hash.
+3. Cada nova movimentação confirmada pela fonte gera um registro no histórico.
+4. Se o WhatsApp estiver conectado, o contato não estiver bloqueado e não houver campanha comum em execução, o aviso entra no envio.
+5. Se o WhatsApp estiver desconectado, o evento permanece pendente.
+6. Respostas de opt-out como `SAIR`, `PARAR` e `STOP` impedem novos avisos para o telefone.
+
+O importador jurídico **não remove um telefone apenas por aparecer em mais de um processo**. A duplicidade jurídica é o mesmo par `processo + telefone`.
+
+Linhas com indicação de **NÃO FALAR / NÃO CONTATAR / opt-out** são ignoradas. Se uma coluna de autorização for selecionada, somente valores afirmativos entram no monitoramento.
+
+### Agendamento gratuito
+
+O workflow `.github/workflows/process-monitor.yml` chama o WA.Auto a cada 30 minutos. Para carteiras grandes, o monitor trabalha em lotes com cursor persistente, evitando tentar milhares de consultas numa única requisição.
+
+A consulta individual de um processo continua disponível pelo botão **Consultar**.
+
+> DataJud e DJEN são fontes externas. Timeout, 429, WAF ou atraso de sincronização são registrados como indisponibilidade parcial; o WA.Auto não transforma falha de consulta ou resultado vazio em afirmação de que o processo não existe.
 ## Persistência cloud
 
 O filesystem de hospedagens gratuitas pode ser descartado. Por isso o WA.Auto usa o SQLite apenas como cache operacional da instância e mantém snapshots comprimidos no Supabase.
@@ -68,7 +99,6 @@ A tabela `wa_auto_snapshots` possui RLS. O snapshot só pode ser lido/escrito qu
 Variáveis necessárias no backend:
 
 ```dotenv
-WA_HOSTED=1
 SUPABASE_URL=https://SEU-PROJETO.supabase.co
 SUPABASE_ANON_KEY=...
 WA_DB_SECRET=...
@@ -152,7 +182,9 @@ Os testes normais não enviam mensagens externas. O smoke test `test:baileys-liv
 | `src/store.js`, `campaigns.js`, `queue.js` | Campanhas, fila e idempotência. |
 | `src/whatsapp.js` | QR, pareamento e WhatsApp via Baileys. |
 | `src/remote-snapshot.js` | Persistência da instância no Supabase. |
+| `src/legal-monitor.js` | DataJud, DJEN, linha de base, deduplicação e alertas processuais. |
 | `src/app.js`, `server.js` | API, frontend e runtime cloud. |
+| `.github/workflows/process-monitor.yml` | Agendamento gratuito dos lotes processuais. |
 | `public/` | Interface web. |
 | `supabase/` | Schema de persistência. |
 | `tests/` | Testes automatizados. |
