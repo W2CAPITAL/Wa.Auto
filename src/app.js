@@ -34,10 +34,11 @@ export function createApp({ store, transport, queue, onMutation = () => {} }) {
     const requestOrigin = host ? `${protocol}://${host}` : '';
     const configuredOrigin = String(process.env.WA_PUBLIC_ORIGIN || '').replace(/\/$/, '');
 
-    if (isMutation) {
-      if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
-      if (origin && origin !== requestOrigin && (!configuredOrigin || origin !== configuredOrigin)) return res.status(403).json({ error: 'Origem não permitida.' });
-      if (req.headers['x-wa-csrf'] !== csrfToken) return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
+    if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
+    if (origin && origin !== requestOrigin && (!configuredOrigin || origin !== configuredOrigin)) return res.status(403).json({ error: 'Origem não permitida.' });
+
+    if (isMutation && req.headers['x-wa-csrf'] !== csrfToken) {
+      return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
     }
     next();
   });
