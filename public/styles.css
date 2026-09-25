@@ -251,3 +251,58 @@ dialog::backdrop{background:rgba(20,36,30,.38);backdrop-filter:blur(5px)}
 
 .contact-more{border:0;background:transparent;color:#84918a;border-radius:6px;padding:6px 8px;font-weight:800;letter-spacing:1px}
 .contact-more:hover{background:#f0f4f2;color:#315347}
+
+.license-section{
+  grid-column:1/-1;
+  display:grid;
+  grid-template-columns:minmax(280px,.75fr) minmax(420px,1.25fr);
+  gap:24px;
+  align-items:center;
+  overflow:hidden;
+  background:
+    radial-gradient(circle at 12% 20%,rgba(98,163,116,.08),transparent 34%),
+    linear-gradient(135deg,#ffffff 0%,#f5faf7 100%);
+}
+.license-section-copy{padding:4px 2px 4px 4px}
+.license-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#e5f4e8;
+  color:#155f48;
+  font-size:9px;
+  font-weight:850;
+  letter-spacing:.12em;
+}
+.license-section h2{font-size:24px;margin:14px 0 6px;color:#12372a}
+.license-section p{color:#68786f;line-height:1.6;font-size:11px}
+.license-author{font-size:13px!important;color:#31483f!important}
+.license-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+.license-card-image{
+  width:100%;
+  display:block;
+  border-radius:16px;
+  box-shadow:0 18px 42px rgba(31,66,51,.12);
+  border:1px solid rgba(22,90,68,.08);
+}
+.app-footer{
+  margin:26px 30px 0;
+  padding:18px 0 28px;
+  border-top:1px solid #e2e8e4;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px 18px;
+  color:#7b8982;
+  font-size:10px;
+}
+.app-footer a{color:#0e624a;font-weight:700}
+@media(max-width:900px){
+  .license-section{grid-template-columns:1fr}
+  .license-card-image{order:-1}
+}
+@media(max-width:760px){
+  .app-footer{margin:20px 12px 0;padding-bottom:22px;flex-direction:column;align-items:flex-start}
+}
