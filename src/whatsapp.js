@@ -122,12 +122,13 @@ export class WhatsApp extends EventEmitter {
           this.client = null;
           if (loggedOut) {
             ++this.generation;
-            void fs.promises.rm(path.join(this.dataDir, 'baileys-auth'), { recursive: true, force: true }).then(() => {
+            try {
+              fs.rmSync(path.join(this.dataDir, 'baileys-auth'), { recursive: true, force: true });
               this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A sessão expirou. Clique em Gerar QR Code para conectar novamente.' });
               this.persistSoon();
-            }).catch(() => {
+            } catch {
               this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'A sessão expirou e não pôde ser limpa. Use Esquecer sessão e gere outro QR Code.' });
-            });
+            }
           } else {
             this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão caiu. A fila foi pausada e a reconexão será tentada automaticamente.' });
             if (!this.manualClose) {
