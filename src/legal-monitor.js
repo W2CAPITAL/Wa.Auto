@@ -269,9 +269,15 @@ export async function fetchDjenProcess(cnj, { fetchImpl = fetch, days = 365 } = 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 28000);
       try {
+        const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || '';
+        const proxyHeaders = { 'Content-Type':'application/json', Accept:'application/json', 'x-region':'sa-east-1' };
+        if (supabaseKey && proxyUrl.includes('.supabase.co/')) {
+          proxyHeaders.Authorization = `Bearer ${supabaseKey}`;
+          proxyHeaders.apikey = supabaseKey;
+        }
         const response = await fetchImpl(proxyUrl, {
           method:'POST',
-          headers:{ 'Content-Type':'application/json', Accept:'application/json' },
+          headers:proxyHeaders,
           body:JSON.stringify({ cnj:digits, start, end }),
           signal:controller.signal
         });
