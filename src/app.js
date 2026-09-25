@@ -162,14 +162,18 @@ export function createApp({ store, transport, queue, legalMonitor = null, onMuta
         .map(row => normalizePhone(row.values[req.body.phoneColumn], '55').phone)
         .filter(Boolean)
     );
-    let created = 0, invalid = 0, blocked = 0, withoutConsent = 0;
+    let created = 0, invalid = 0, blocked = 0, withoutConsent = 0, duplicates = 0;
     const ids = [];
+    const seen = new Set();
     for (const row of sheet.rows) {
       const cnj = normalizeCnj(row.values[req.body.processColumn]);
       const { phone } = normalizePhone(row.values[req.body.phoneColumn], '55');
       if (!cnj || !phone) { invalid++; continue; }
       if (blockedInRow(row.values) || blockedPhones.has(phone) || store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { blocked++; continue; }
       if (consentColumn && !affirmative(row.values[consentColumn])) { withoutConsent++; continue; }
+      const key = `${cnj}:${phone}`;
+      if (seen.has(key)) { duplicates++; continue; }
+      seen.add(key);
       const monitor = store.createLegalMonitor({
         cnj,
         clientName:String(nameColumn ? row.values[nameColumn] || 'Cliente' : 'Cliente').trim().slice(0,160) || 'Cliente',
@@ -180,7 +184,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, onMuta
       });
       ids.push(monitor.id); created++;
     }
-    res.status(201).json({ created, invalid, blocked, withoutConsent, monitors:ids });
+    res.status(201).json({ created, invalid, blocked, withoutConsent, duplicates, monitors:ids });
   });
   app.post('/api/legal/monitors/:id/toggle', (req, res) => {
     const current = store.legalMonitor(req.params.id);
