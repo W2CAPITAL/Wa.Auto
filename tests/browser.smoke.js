@@ -129,11 +129,11 @@ try {
   await page.click('[data-page="help"]');
   assert.match(await page.$eval('#page-help', el => el.innerText), /Uma lista vira conversa/);
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-  await page.click('[data-page="processes"]');
+  await page.click('.mobile-nav [data-page="processes"]');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'test-results/03-processos-mobile.png', fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Process monitor mobile horizontal overflow');
-  await page.click('[data-page="campaigns"]');
+  await page.click('.mobile-nav [data-page="campaigns"]');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: 'test-results/04-mobile.png', fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Mobile horizontal overflow');
