@@ -46,6 +46,7 @@ export function createApp({ store, transport, queue }) {
     next();
   });
   app.use(express.json({ limit: '2mb' }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, service: 'WA.Auto', pid: process.pid, uptime: Math.floor(process.uptime()) }));
   app.get('/api/bootstrap', (req, res) => res.json({ csrfToken, connection: transport.snapshot(), campaigns: store.campaigns(), latestImport: store.latestImport(), nextSendAt: Number(store.getMeta('nextSendAt') || 0) }));
   app.get('/api/state', (req, res) => res.json({ connection: transport.snapshot(), campaigns: store.campaigns(), nextSendAt: Number(store.getMeta('nextSendAt') || 0), busy: queue.busy }));
   app.post('/api/whatsapp/connect', async (req, res) => { await transport.connect(); res.json(transport.snapshot()); });
