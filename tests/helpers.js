@@ -9,7 +9,7 @@ export class TestTransport extends EventEmitter {
   snapshot() { return { status: this.ready ? 'ready' : 'disconnected', account: { name: 'Teste isolado', phone: '' } }; }
   async resolve(phone) { return `${phone}@c.us`; }
   async send(jid, message) { this.sent.push({ jid, message }); return { id: `test-${this.sent.length}`, ack: 1 }; }
-  async connect() { this.ready = true; this.emit('state', this.snapshot()); }
+  async connect(options = {}) { this.lastConnectOptions = options; this.ready = true; this.emit('state', this.snapshot()); }
   async close() { this.ready = false; this.emit('state', this.snapshot()); }
   async logout() { await this.close(); }
 }
