@@ -53,6 +53,24 @@ export function createApp({ store, transport, queue }) {
   app.post('/api/campaigns/:id/start', (req, res) => { requireValue(req.body?.reviewed === true, 'Revise a mensagem e os destinatários antes de iniciar.'); queue.start(req.params.id); res.json(store.campaign(req.params.id)); });
   app.post('/api/campaigns/:id/pause', (req, res) => { queue.pause(req.params.id); res.json(store.campaign(req.params.id)); });
   app.post('/api/campaigns/:id/cancel', (req, res) => { queue.cancel(req.params.id); res.json(store.campaign(req.params.id)); });
+  app.post('/api/campaigns/:id/entries/:entryId/resolve', (req, res) => {
+    const campaign = store.campaign(req.params.id);
+    requireValue(campaign.status !== 'running' && !queue.busy, 'Pause a campanha e aguarde o envio atual terminar antes de resolver esta linha.', 409);
+    const entry = store.entry(Number(req.params.entryId));
+    requireValue(entry && entry.campaign_id === req.params.id, 'Destinatário não encontrado nesta campanha.', 404);
+    requireValue(entry.status === 'uncertain', 'Somente linhas em “Conferir no WhatsApp” podem ser resolvidas manualmente.', 409);
+    requireValue(['sent', 'retry'].includes(req.body?.action), 'Escolha uma resolução válida.');
+    if (req.body.action === 'sent') {
+      store.updateEntry(entry.id, { status: 'sent', reason: 'Confirmada manualmente após conferência no WhatsApp.' });
+      const counts = store.counts(req.params.id);
+      const unresolved = ['pending', 'resolving', 'sending', 'uncertain'].some(status => (counts[status] || 0) > 0);
+      if (!unresolved && ['draft', 'paused'].includes(campaign.status)) store.setCampaign(req.params.id, 'completed', 'Conferência manual concluída.');
+    } else {
+      store.updateEntry(entry.id, { status: 'pending', reason: 'Reenvio autorizado manualmente após conferência no WhatsApp.' });
+      if (campaign.status === 'completed') store.setCampaign(req.params.id, 'paused', 'Há uma linha autorizada manualmente para novo envio.');
+    }
+    res.json({ campaign: store.campaign(req.params.id), entries: store.entries(req.params.id).map(({ values, ...row }) => row) });
+  });
   app.get('/api/campaigns/:id/report.csv', (req, res) => {
     const campaign = store.campaign(req.params.id);
     res.set('Content-Disposition', `attachment; filename="wa-auto-${campaign.id.slice(0, 8)}.csv"`).type('text/csv; charset=utf-8').send(csvReport(campaign, store.entries(campaign.id)));
