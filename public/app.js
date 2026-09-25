@@ -590,7 +590,7 @@ onClick('legal-import-button', async () => {
     notifyWhatsapp:true
   }});
   await loadLegal();
-  toast(`${number(result.created)} processo(s) importado(s) · ${number(result.invalid)} inválido(s) · ${number(result.blocked)} bloqueado(s) · ${number(result.withoutConsent || 0)} sem autorização.`);
+  toast(`${number(result.created)} processo(s) importado(s) · ${number(result.duplicates || 0)} repetido(s) · ${number(result.invalid)} inválido(s) · ${number(result.blocked)} bloqueado(s) · ${number(result.withoutConsent || 0)} sem autorização.`);
 });
 
 async function renderBlocked() {
