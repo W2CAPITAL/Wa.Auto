@@ -188,7 +188,7 @@ function renderConnection() {
   $('connection-dot').className = `status-dot${ready ? ' ready' : waiting ? ' waiting' : ''}`;
   $('connection-label').textContent = HOSTED_MODE && !state.engineAvailable ? 'Motor local desligado' : !state.online ? 'App sem conexão' : ready ? 'WhatsApp conectado' : waiting ? 'Conectando WhatsApp' : 'WhatsApp desconectado';
   let content;
-  if (HOSTED_MODE && !state.engineAvailable) content = '<div><div class="connected-avatar">!</div><p class="muted">O painel web está aberto, mas o motor do WhatsApp não está rodando neste PC.</p></div>';
+  if (HOSTED_MODE && !state.engineAvailable) content = '<div><div class="connected-avatar">!</div><p class="muted">O painel web está aberto, mas o motor do WhatsApp não está rodando neste PC.</p><p class="muted">1. Baixe o iniciador.<br>2. Execute no Windows.<br>3. Volte aqui e clique em Conectar motor.</p><a class="button secondary" href="/INICIAR-WA.AUTO.cmd" download>Baixar iniciador Windows ↓</a></div>';
   else if (current.qr) content = `<img src="${escape(current.qr)}" alt="QR Code para conectar o seu WhatsApp">`;
   else if (current.pairingCode) content = `<div class="pairing-code-box"><span class="eyebrow">CÓDIGO DE PAREAMENTO</span><strong class="pairing-code">${escape(current.pairingCode)}</strong><p class="muted">Digite este código no WhatsApp do celular.</p></div>`;
   else if (ready) content = `<div><div class="connected-avatar">✓</div><p class="connection-account">${escape(current.account?.name)}</p><p class="connection-number">${escape(current.account?.phone ? `+${current.account.phone}` : '')}</p></div>`;
@@ -343,7 +343,7 @@ let pollTimer = null;
 function hostedOfflineBanner(message = 'Motor local desligado.') {
   const banner = $('global-error');
   banner.className = 'info';
-  banner.innerHTML = `${escape(message)} <strong>Para usar planilhas e WhatsApp:</strong> abra o WA.Auto para Windows neste PC e depois <button class="text-link" id="retry-engine">Conectar motor</button>. <a href="https://github.com/W2CAPITAL/Wa.Auto/actions" target="_blank" rel="noreferrer">Baixar pacote Windows ↗</a>`;
+  banner.innerHTML = `${escape(message)} <strong>Para usar planilhas e WhatsApp:</strong> <a href="/INICIAR-WA.AUTO.cmd" download>baixe e execute o iniciador Windows</a> e depois <button class="text-link" id="retry-engine">Conectar motor</button>.`;
   $('retry-engine')?.addEventListener('click', () => void perform($('retry-engine'), connectEngine));
 }
 
