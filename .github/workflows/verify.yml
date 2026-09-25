@@ -1,28 +1,29 @@
-name: Verificar WA.Auto
+name: Verificar WA.Auto Cloud
 on:
   push:
     branches: [main]
   pull_request:
+
 permissions:
   contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: npm
-      - run: npm ci --no-fund
-      - run: npm run verify
-      - run: npx puppeteer browsers install chrome
-      - run: npm run test:browser
-      - run: npm run test:hosted
+          node-version: '22'
+      - name: Instalar dependencias
+        run: npm install --no-fund
+      - name: Verificar codigo e testes
+        run: npm run verify
+      - name: Instalar Chrome apenas para teste visual
+        run: npx puppeteer browsers install chrome
+      - name: Testar interface
+        run: npm run test:browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -31,134 +32,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  windows-portable:
-    runs-on: windows-latest
-    timeout-minutes: 15
-    env:
-      PUPPETEER_SKIP_DOWNLOAD: 'true'
+  whatsapp-cloud:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: npm
+          node-version: '22'
       - name: Instalar dependencias
-        run: npm ci --no-fund
-      - name: Testar codigo no Windows
-        run: npm run verify
-      - name: Testar INICIAR-WINDOWS.cmd de ponta a ponta
-        shell: cmd
-        env:
-          WA_STARTUP_TEST: '1'
-        run: INICIAR-WINDOWS.cmd
-      - name: Montar pacote portatil
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
-          New-Item $dist -ItemType Directory -Force | Out-Null
-          Copy-Item (Get-Command node).Source (Join-Path $dist 'node.exe')
-          Copy-Item 'src' (Join-Path $dist 'src') -Recurse
-          Copy-Item 'public' (Join-Path $dist 'public') -Recurse
-          Copy-Item 'node_modules' (Join-Path $dist 'node_modules') -Recurse
-          Copy-Item 'package.json' (Join-Path $dist 'package.json')
-          Copy-Item 'INICIAR-PORTATIL.cmd' (Join-Path $dist 'INICIAR-WA.AUTO.cmd')
-          @'
-          WA.Auto para Windows
-          =====================
-          1. Extraia todo o ZIP para uma pasta normal.
-          2. Dê dois cliques em INICIAR-WA.AUTO.cmd.
-          3. Mantenha a janela preta aberta durante os envios.
-          4. O painel abre em http://127.0.0.1:3210.
-          5. Conecte pelo QR Code ou pelo código de pareamento por telefone.
-
-          Este pacote inclui o runtime Node. Não execute diretamente de dentro do ZIP.
-          '@ | Set-Content (Join-Path $dist 'LEIA-ME.txt') -Encoding UTF8
-      - name: Validar runtime e modulo do WhatsApp no pacote
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
-          Push-Location $dist
-          & .\node.exe -e "import('whatsapp-web.js').then(m=>{const p=m.default||m;if(!p.Client||!p.LocalAuth)process.exit(2);console.log('whatsapp-web.js OK')})"
-          if ($LASTEXITCODE -ne 0) { throw 'whatsapp-web.js nao carregou no pacote portatil' }
-          Pop-Location
-      - name: Iniciar pacote e exigir api bootstrap
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
-          $env:WA_DATA_DIR = Join-Path $env:RUNNER_TEMP 'wa-auto-portable-data'
-          $env:WA_OPEN_BROWSER = '0'
-          $env:WA_AUTO_CONNECT = '0'
-          $process = Start-Process -FilePath (Join-Path $dist 'node.exe') -ArgumentList 'src/server.js' -WorkingDirectory $dist -PassThru -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'wa-auto-out.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'wa-auto-err.log')
-          try {
-            $ok = $false
-            for ($i=0; $i -lt 30; $i++) {
-              Start-Sleep -Milliseconds 500
-              try {
-                $r = Invoke-WebRequest 'http://127.0.0.1:3210/api/bootstrap' -UseBasicParsing -TimeoutSec 2
-                if ($r.StatusCode -eq 200) {
-                  $json = $r.Content | ConvertFrom-Json
-                  if (-not $json.csrfToken) { throw 'bootstrap sem csrfToken' }
-                  $ok = $true
-                  break
-                }
-              } catch {}
-              if ($process.HasExited) { break }
-            }
-            if (-not $ok) {
-              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-out.log') -ErrorAction SilentlyContinue
-              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-err.log') -ErrorAction SilentlyContinue
-              throw 'Pacote portatil nao respondeu em 127.0.0.1:3210/api/bootstrap'
-            }
-            Write-Host 'Pacote Windows respondeu /api/bootstrap com HTTP 200.'
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-          }
-      - name: Exigir QR real do WhatsApp Web no Windows
-        if: github.event_name == 'push'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dist = Join-Path $PWD 'dist\WA.Auto-Windows'
-          $env:WA_DATA_DIR = Join-Path $env:RUNNER_TEMP 'wa-auto-live-qr'
-          $env:WA_OPEN_BROWSER = '0'
-          $env:WA_AUTO_CONNECT = '1'
-          $process = Start-Process -FilePath (Join-Path $dist 'node.exe') -ArgumentList 'src/server.js' -WorkingDirectory $dist -PassThru -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'wa-auto-live-out.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'wa-auto-live-err.log')
-          try {
-            $qr = $false
-            for ($i=0; $i -lt 90; $i++) {
-              Start-Sleep -Seconds 1
-              try {
-                $r = Invoke-WebRequest 'http://127.0.0.1:3210/api/state' -UseBasicParsing -TimeoutSec 3
-                $state = $r.Content | ConvertFrom-Json
-                $status = $state.connection.status
-                Write-Host "WhatsApp status: $status"
-                if ($status -eq 'qr' -or $status -eq 'authenticated' -or $status -eq 'ready') {
-                  $qr = $true
-                  break
-                }
-                if ($status -eq 'error') {
-                  throw ("WhatsApp informou erro: " + $state.connection.message)
-                }
-              } catch {
-                if ($_.Exception.Message -like 'WhatsApp informou erro:*') { throw }
-              }
-              if ($process.HasExited) { break }
-            }
-            if (-not $qr) {
-              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-live-out.log') -ErrorAction SilentlyContinue
-              Get-Content (Join-Path $env:RUNNER_TEMP 'wa-auto-live-err.log') -ErrorAction SilentlyContinue
-              throw 'O cliente real do WhatsApp Web nao chegou ao QR em 90 segundos.'
-            }
-            Write-Host 'QR real do WhatsApp Web alcançado com sucesso.'
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-          }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: WA.Auto-Windows
-          path: dist/WA.Auto-Windows/
-          retention-days: 30
-          compression-level: 6
+        run: npm install --no-fund
+      - name: Exigir QR real via Baileys sem Chromium
+        run: npm run test:baileys-live
