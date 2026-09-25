@@ -5,7 +5,7 @@
   "description": "Envio de mensagens a clientes a partir de Excel e CSV, com WhatsApp conectado por QR Code.",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0 <25"
+    "node": ">=22.0.0 <25"
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
@@ -13,7 +13,8 @@
     "test:browser": "node tests/browser.smoke.js",
     "check": "node scripts/check.js",
     "verify": "npm run check && npm test",
-    "test:hosted": "node tests/browser.hosted.js"
+    "test:hosted": "node tests/browser.hosted.js",
+    "start:cloud": "WA_HOSTED=1 node --env-file-if-exists=.env src/server.js"
   },
   "dependencies": {
     "csv-parse": "7.0.2",
@@ -21,6 +22,6 @@
     "express": "5.2.1",
     "multer": "2.4.0",
     "qrcode": "1.5.4",
-    "whatsapp-web.js": "1.34.7"
+    "@whiskeysockets/baileys": "6.7.24"
   }
 }
