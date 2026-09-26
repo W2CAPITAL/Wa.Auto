@@ -15,17 +15,48 @@ const timeout = (promise, milliseconds) => {
 
 const phoneFromJid = jid => String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 const normalizeJid = jid => String(jid || '').replace(/:\d+@/, '@');
-function messageText(message) {
+function messageContent(message) {
   let content = message?.message || {};
   if (content.ephemeralMessage?.message) content = content.ephemeralMessage.message;
   if (content.viewOnceMessage?.message) content = content.viewOnceMessage.message;
+  if (content.viewOnceMessageV2?.message) content = content.viewOnceMessageV2.message;
+  return content;
+}
+function messageText(message) {
+  const content = messageContent(message);
   return String(
     content.conversation ||
     content.extendedTextMessage?.text ||
     content.imageMessage?.caption ||
     content.videoMessage?.caption ||
+    content.documentMessage?.caption ||
     ''
   );
+}
+function mediaInfo(message) {
+  const content = messageContent(message);
+  const candidates = [
+    ['image', content.imageMessage],
+    ['video', content.videoMessage],
+    ['audio', content.audioMessage],
+    ['document', content.documentMessage],
+    ['sticker', content.stickerMessage],
+  ];
+  for (const [type, value] of candidates) {
+    if (!value) continue;
+    return {
+      type,
+      mimeType: String(value.mimetype || ''),
+      fileName: String(value.fileName || value.file_name || `${type}-${message?.key?.id || 'media'}`).slice(0,220),
+    };
+  }
+  return { type: null, mimeType: '', fileName: '' };
+}
+function messageTime(message) {
+  let value = message?.messageTimestamp;
+  if (value && typeof value === 'object' && typeof value.toNumber === 'function') value = value.toNumber();
+  const seconds = Number(value);
+  return new Date(Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : Date.now()).toISOString();
 }
 
 export class WhatsApp extends EventEmitter {
@@ -33,12 +64,16 @@ export class WhatsApp extends EventEmitter {
     packageLoader = () => import('@whiskeysockets/baileys'),
     qrEncoder = (code, options) => QRCode.toDataURL(code, options),
     onPersistentChange = () => {},
+    allowGroups = process.env.WA_MCP_ALLOW_GROUPS === '1',
   } = {}) {
     super();
     this.dataDir = dataDir;
     this.packageLoader = packageLoader;
     this.qrEncoder = qrEncoder;
     this.onPersistentChange = onPersistentChange;
+    this.allowGroups = !!allowGroups;
+    this.recentMedia = new Map();
+    this.baileysModule = null;
     this.state = { status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'Conecte seu WhatsApp para começar.' };
     this.generation = 0;
     this.connecting = false;
@@ -59,6 +94,7 @@ export class WhatsApp extends EventEmitter {
     try {
       const generation = ++this.generation;
       const module = await this.packageLoader();
+      this.baileysModule = module;
       const makeWASocket = module.default || module.makeWASocket;
       const { useMultiFileAuthState, Browsers = {}, DisconnectReason = {} } = module;
       requireValue(makeWASocket && useMultiFileAuthState, 'A integração cloud do WhatsApp não carregou corretamente.');
@@ -72,7 +108,7 @@ export class WhatsApp extends EventEmitter {
         markOnlineOnConnect: false,
         syncFullHistory: false,
         generateHighQualityLinkPreview: false,
-        shouldIgnoreJid: jid => String(jid || '').endsWith('@g.us'),
+        shouldIgnoreJid: jid => !this.allowGroups && String(jid || '').endsWith('@g.us'),
       });
       this.client = client;
       this.disconnectReason = DisconnectReason;
@@ -152,16 +188,62 @@ export class WhatsApp extends EventEmitter {
         this.persistSoon();
       });
 
+      const emitContact = contact => {
+        const jid = normalizeJid(contact?.id || contact?.jid);
+        if (!jid || (!this.allowGroups && jid.endsWith('@g.us'))) return;
+        this.emit('contact', {
+          jid,
+          phone: jid.endsWith('@g.us') ? '' : phoneFromJid(jid),
+          name: String(contact?.name || contact?.notify || contact?.verifiedName || '').slice(0,240),
+        });
+      };
+      client.ev.on('contacts.upsert', contacts => {
+        if (!current()) return;
+        for (const contact of contacts || []) emitContact(contact);
+        this.persistSoon();
+      });
+      client.ev.on('contacts.update', contacts => {
+        if (!current()) return;
+        for (const contact of contacts || []) emitContact(contact);
+        this.persistSoon();
+      });
+
       client.ev.on('messages.upsert', ({ messages }) => {
         if (!current()) return;
         for (const message of messages || []) {
-          if (message?.key?.fromMe) continue;
-          const from = normalizeJid(message?.key?.remoteJid);
-          if (!/(@s\.whatsapp\.net|@lid)$/.test(from)) continue;
-          const body = fold(messageText(message)).replace(/[.!?]+$/, '').trim();
+          const chatJid = normalizeJid(message?.key?.remoteJid);
+          const allowed = /(@s\.whatsapp\.net|@lid)$/.test(chatJid) || (this.allowGroups && /@g\.us$/.test(chatJid));
+          if (!allowed) continue;
+
+          const id = String(message?.key?.id || '').trim();
+          const isFromMe = !!message?.key?.fromMe;
+          const senderJid = normalizeJid(message?.key?.participant || (isFromMe ? client.user?.id : chatJid));
+          const media = mediaInfo(message);
+          const text = messageText(message);
+          if (id) {
+            this.emit('message', {
+              id,
+              chatJid,
+              senderJid,
+              senderPhone: senderJid.endsWith('@g.us') ? '' : phoneFromJid(senderJid),
+              content: text,
+              isFromMe,
+              mediaType: media.type,
+              timestamp: messageTime(message),
+              chatName: String(message?.pushName || '').slice(0,240),
+            });
+          }
+
+          if (media.type && id) {
+            this.recentMedia.set(id, { message, ...media, at: Date.now() });
+            while (this.recentMedia.size > 100) this.recentMedia.delete(this.recentMedia.keys().next().value);
+          }
+
+          if (isFromMe || chatJid.endsWith('@g.us')) continue;
+          const body = fold(text).replace(/[.!?]+$/, '').trim();
           if (!/^(sair|parar|cancelar|stop|remover|descadastrar|nao quero receber( mensagens)?|nao me envie( mais)? mensagens)$/.test(body)) continue;
-          const phone = phoneFromJid(from);
-          this.emit('optout', { identities: [from, phone].filter(Boolean) });
+          const phone = phoneFromJid(chatJid);
+          this.emit('optout', { identities: [chatJid, phone].filter(Boolean) });
         }
         this.persistSoon();
       });
@@ -202,12 +284,80 @@ export class WhatsApp extends EventEmitter {
     const client = this.client;
     try {
       const result = await timeout(client.sendMessage(jid, { text }), 60000);
+      const id = result?.key?.id || result?.id;
+      if (id) this.emit('message', {
+        id,
+        chatJid: normalizeJid(jid),
+        senderJid: normalizeJid(client.user?.id),
+        senderPhone: phoneFromJid(client.user?.id),
+        content: text,
+        isFromMe: true,
+        mediaType: null,
+        timestamp: new Date().toISOString(),
+        chatName: '',
+      });
       this.persistSoon();
-      return { id: result?.key?.id || result?.id, ack: 0 };
+      return { id, ack: 0 };
     } catch (error) {
       await this.close();
       throw error;
     }
+  }
+
+
+  async sendFile(jid, { data, fileName = 'arquivo', mimeType = 'application/octet-stream', caption = '', ptt = false } = {}) {
+    requireValue(this.isReady(), 'WhatsApp desconectado.', 409);
+    requireValue(Buffer.isBuffer(data) && data.length > 0, 'Arquivo inválido.');
+    const client = this.client;
+    const type = /^image\//i.test(mimeType) ? 'image'
+      : /^video\//i.test(mimeType) ? 'video'
+      : /^audio\//i.test(mimeType) ? 'audio'
+      : 'document';
+    const payload = type === 'image'
+      ? { image: data, mimetype: mimeType, caption }
+      : type === 'video'
+        ? { video: data, mimetype: mimeType, caption }
+        : type === 'audio'
+          ? { audio: data, mimetype: mimeType, ptt: !!ptt }
+          : { document: data, mimetype: mimeType, fileName, caption };
+    try {
+      const result = await timeout(client.sendMessage(jid, payload), 90000);
+      const id = result?.key?.id || result?.id;
+      if (id) this.emit('message', {
+        id,
+        chatJid: normalizeJid(jid),
+        senderJid: normalizeJid(client.user?.id),
+        senderPhone: phoneFromJid(client.user?.id),
+        content: caption || fileName,
+        isFromMe: true,
+        mediaType: type,
+        timestamp: new Date().toISOString(),
+        chatName: '',
+      });
+      this.persistSoon();
+      return { id, ack: 0 };
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
+  }
+
+  async downloadMedia(messageId, maxBytes = 6 * 1024 * 1024) {
+    requireValue(this.isReady(), 'WhatsApp desconectado.', 409);
+    const cached = this.recentMedia.get(String(messageId || ''));
+    requireValue(cached, 'A mídia não está mais no cache efêmero desta instância.', 404);
+    requireValue(Date.now() - cached.at <= 30 * 60 * 1000, 'A mídia expirou do cache efêmero.', 410);
+    const downloadMediaMessage = this.baileysModule?.downloadMediaMessage;
+    requireValue(typeof downloadMediaMessage === 'function', 'Download de mídia indisponível nesta versão do Baileys.', 503);
+
+    const options = this.client?.updateMediaMessage
+      ? { reuploadRequest: this.client.updateMediaMessage.bind(this.client) }
+      : {};
+    const data = await timeout(downloadMediaMessage(cached.message, 'buffer', {}, options), 90000);
+    const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data || []);
+    requireValue(buffer.length > 0, 'O WhatsApp não retornou a mídia.');
+    requireValue(buffer.length <= maxBytes, 'Mídia acima do limite permitido.', 413);
+    return { data: buffer, mimeType: cached.mimeType || 'application/octet-stream', fileName: cached.fileName || 'media' };
   }
 
   async logout() {
