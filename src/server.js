@@ -9,6 +9,7 @@ import { RemoteSnapshot } from './remote-snapshot.js';
 import { LegalMonitorService } from './legal-monitor.js';
 import { ResourceGuard } from './resource-guard.js';
 import { normalizePhone } from './phone.js';
+import { WhatsAppMemory } from './whatsapp-memory.js';
 
 const dataDir = path.resolve(process.env.WA_DATA_DIR || path.join(os.tmpdir(), 'wa-auto-cloud'));
 fs.mkdirSync(dataDir, { recursive: true });
@@ -43,6 +44,7 @@ try { acquireLock(); } catch (error) { console.error(error.message); process.exi
 process.on('exit', () => { try { if (fs.readFileSync(lockPath, 'utf8') === String(process.pid)) fs.unlinkSync(lockPath); } catch {} });
 
 const store = new Store(path.join(dataDir, 'wa-auto.sqlite'));
+const whatsappMemory = new WhatsAppMemory(store.db);
 
 try {
   const intent = await snapshot.getIntent();
@@ -66,8 +68,8 @@ const persist = () => snapshot.schedule(dataDir, store);
 const resourceGuard = new ResourceGuard();
 const transport = new WhatsApp(dataDir, { onPersistentChange: persist });
 transport.on('state', state => console.log(`WhatsApp state: ${state.status}`));
-transport.on('message', message => { store.recordWhatsAppMessage(message); persist(); });
-transport.on('contact', contact => { store.upsertWhatsAppContact(contact); persist(); });
+transport.on('message', message => { whatsappMemory.record(message); persist(); });
+transport.on('contact', contact => { whatsappMemory.upsertContact(contact); persist(); });
 const queue = new Queue(store, transport, { resourceGuard, criticalIntent:snapshot });
 queue.on('change', persist);
 queue.on('queueError', persist);
@@ -120,7 +122,7 @@ async function runOneOffReturnFromEnv() {
 }
 
 
-const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, onMutation: persist });
+const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, whatsappMemory, onMutation: persist });
 const port = Number(process.env.PORT || 10000);
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`\nWA.Auto Cloud está pronto na porta ${port}.\n`);
@@ -147,7 +149,8 @@ resourceTimer.unref?.();
 
 const pruneTimer = setInterval(() => {
   const removed = store.pruneHistory(retentionDays());
-  if (removed.legalScrubbed || removed.campaigns || removed.whatsappMessages || removed.whatsappChats) persist();
+  const waRemoved = whatsappMemory.prune(retentionDays());
+  if (removed.legalScrubbed || removed.campaigns || waRemoved.messages || waRemoved.chats) persist();
 }, 6 * 60 * 60 * 1000);
 pruneTimer.unref?.();
 
