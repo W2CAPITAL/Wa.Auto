@@ -16,6 +16,15 @@ const rpc = async (base, token, body) => fetch(base + '/mcp', {
   },
   body:JSON.stringify(body)
 });
+const rpcPayload = async response => {
+  const text = await response.text();
+  if ((response.headers.get('content-type') || '').includes('text/event-stream') || /^event:/m.test(text)) {
+    const values = [...text.matchAll(/^data:\s*(.+)$/gm)].map(match => match[1]);
+    assert.ok(values.length > 0, 'Resposta SSE sem evento data.');
+    return JSON.parse(values.at(-1));
+  }
+  return JSON.parse(text);
+};
 
 test('MCP: exige token e expõe ferramentas de leitura em modo seguro', async t => {
   const previousToken=process.env.WA_MCP_TOKEN;
@@ -53,12 +62,12 @@ test('MCP: exige token e expõe ferramentas de leitura em modo seguro', async t 
     params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'wa-auto-test',version:'1.0.0'}}
   });
   assert.equal(initialize.status,200);
-  const initPayload=await initialize.json();
+  const initPayload=await rpcPayload(initialize);
   assert.equal(initPayload.result?.serverInfo?.name,'wa-auto-whatsapp');
 
   const tools=await rpc(base,token,{jsonrpc:'2.0',id:2,method:'tools/list',params:{}});
   assert.equal(tools.status,200);
-  const toolPayload=await tools.json();
+  const toolPayload=await rpcPayload(tools);
   const names=(toolPayload.result?.tools||[]).map(item=>item.name);
   assert.ok(names.includes('search_contacts'));
   assert.ok(names.includes('list_messages'));
@@ -70,6 +79,6 @@ test('MCP: exige token e expõe ferramentas de leitura em modo seguro', async t 
     params:{name:'search_contacts',arguments:{query:'Ana'}}
   });
   assert.equal(search.status,200);
-  const searchPayload=await search.json();
+  const searchPayload=await rpcPayload(search);
   assert.equal(searchPayload.result?.structuredContent?.items?.[0]?.name,'Ana');
 });
