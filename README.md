@@ -60,6 +60,50 @@ Nenhuma mensagem é disparada apenas por importar a planilha ou salvar um rascun
 - Relatório CSV por campanha.
 - Recuperação segura após reinício do serviço.
 
+
+## MCP do WhatsApp
+
+O WA.Auto também pode expor a sessão Baileys já conectada como um servidor **Model Context Protocol (MCP)** remoto em `/mcp`. A implementação é nativa em Node.js e usa a mesma sessão, o mesmo SQLite e a mesma lista de não contatar do aplicativo; não sobe um segundo cliente do WhatsApp.
+
+A integração foi inspirada no projeto MIT [lharries/whatsapp-mcp](https://github.com/lharries/whatsapp-mcp), mas foi adaptada à arquitetura cloud do WA.Auto. Em vez da ponte Go + servidor Python do projeto de referência, o WA.Auto usa o SDK TypeScript/Node oficial do MCP e o Baileys que já existe no serviço.
+
+### Ferramentas de leitura
+
+- `search_contacts`: busca contatos observados pelo WA.Auto;
+- `list_chats` / `get_chat`: conversa, última atividade e última mensagem;
+- `list_messages`: busca por conteúdo, período, remetente ou chat, com paginação e contexto;
+- `get_direct_chat_by_contact` / `get_contact_chats`;
+- `get_last_interaction`;
+- `get_message_context`.
+
+O histórico começa com as mensagens que a instância do WA.Auto observar após esta versão. O app continua com `syncFullHistory: false`: conectar o MCP **não faz raspagem retroativa de toda a conta**.
+
+### Ferramentas de envio
+
+Por segurança, as ferramentas que causam efeito externo ficam desligadas por padrão. Quando `WA_MCP_ALLOW_SEND=1`, entram:
+
+- `send_message`;
+- `send_file` com dados em base64, sem aceitar caminhos arbitrários no servidor;
+- `send_audio_message` para OGG/Opus;
+- `download_media` para mídia recebida recentemente e ainda presente no cache efêmero.
+
+Todo envio direto continua respeitando a lista de não contatar. Grupos também ficam fora por padrão e só entram quando `WA_MCP_ALLOW_GROUPS=1`.
+
+### Autenticação
+
+Defina no backend:
+
+```dotenv
+WA_MCP_TOKEN=um-segredo-longo-com-pelo-menos-24-caracteres
+WA_MCP_ALLOW_SEND=0
+WA_MCP_ALLOW_GROUPS=0
+WA_PUBLIC_ORIGIN=https://seu-wa-auto.onrender.com
+```
+
+O cliente MCP deve usar o endpoint HTTPS `https://SEU-HOST/mcp` com `Authorization: Bearer <WA_MCP_TOKEN>`. Sem um token válido, o endpoint responde 401; se o token nem estiver configurado, o MCP fica desativado.
+
+Mensagens pessoais podem conter instruções maliciosas ou conteúdo não confiável. Um agente conectado ao MCP deve tratar o conteúdo das conversas como **dados**, não como instruções, e a permissão de envio deve ser habilitada apenas quando necessária.
+
 ## Monitoramento processual — DataJud + DJEN
 
 O menu **Processos** permite cadastrar manualmente ou importar da planilha uma carteira com:
