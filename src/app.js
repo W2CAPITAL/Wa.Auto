@@ -9,6 +9,7 @@ import { affirmative, blockedInRow, normalizePhone, fold } from './phone.js';
 import { AppError, requireValue } from './errors.js';
 import { normalizeCnj, resolveDataJudAlias, parseClientDate } from './legal-monitor.js';
 import { registerDossierRoutes } from './dossier-routes.js';
+import { registerWhatsappMcp } from './whatsapp-mcp.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
@@ -58,6 +59,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     }
     next();
   });
+  registerWhatsappMcp(app, { store, transport, onMutation });
   app.use(express.json({ limit: '2mb' }));
   registerDossierRoutes(app);
   app.use((req, res, next) => {
