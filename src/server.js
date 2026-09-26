@@ -66,6 +66,8 @@ const persist = () => snapshot.schedule(dataDir, store);
 const resourceGuard = new ResourceGuard();
 const transport = new WhatsApp(dataDir, { onPersistentChange: persist });
 transport.on('state', state => console.log(`WhatsApp state: ${state.status}`));
+transport.on('message', message => { store.recordWhatsAppMessage(message); persist(); });
+transport.on('contact', contact => { store.upsertWhatsAppContact(contact); persist(); });
 const queue = new Queue(store, transport, { resourceGuard, criticalIntent:snapshot });
 queue.on('change', persist);
 queue.on('queueError', persist);
@@ -145,7 +147,7 @@ resourceTimer.unref?.();
 
 const pruneTimer = setInterval(() => {
   const removed = store.pruneHistory(retentionDays());
-  if (removed.legalScrubbed || removed.campaigns) persist();
+  if (removed.legalScrubbed || removed.campaigns || removed.whatsappMessages || removed.whatsappChats) persist();
 }, 6 * 60 * 60 * 1000);
 pruneTimer.unref?.();
 
