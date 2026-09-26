@@ -45,7 +45,7 @@ function fakePackage({ autoOpen = true, registered = false } = {}) {
 
 test('WhatsApp cloud: QR → pronto → resolve → envia → ACK → opt-out', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-auto-baileys-'));
-  const states = []; const acks = []; const optouts = []; let persisted = 0;
+  const states = []; const acks = []; const optouts = []; const messages = []; let persisted = 0;
   const transport = new WhatsApp(dir, {
     packageLoader: async () => fakePackage(),
     qrEncoder: async code => `data:image/png;base64,${code}`,
@@ -54,6 +54,7 @@ test('WhatsApp cloud: QR → pronto → resolve → envia → ACK → opt-out', 
   transport.on('state', state => states.push({ ...state }));
   transport.on('ack', event => acks.push(event));
   transport.on('optout', event => optouts.push(event));
+  transport.on('message', event => messages.push(event));
 
   await transport.connect();
   await tick(); await tick(); await tick();
@@ -64,11 +65,18 @@ test('WhatsApp cloud: QR → pronto → resolve → envia → ACK → opt-out', 
   assert.equal(await transport.resolve('5511000000000'), null);
   assert.deepEqual(await transport.send('5511999990002@s.whatsapp.net', 'Olá!'), { id: 'message-1', ack: 0 });
   assert.deepEqual(FakeSocket.instance.lastSend, { jid: '5511999990002@s.whatsapp.net', content: { text: 'Olá!' } });
+  assert.ok(messages.some(event => event.isFromMe && event.chatJid === '5511999990002@s.whatsapp.net' && event.content === 'Olá!'));
+
+  await transport.sendFile('5511999990002@s.whatsapp.net', { data:Buffer.from('imagem'), fileName:'foto.png', mimeType:'image/png', caption:'Anexo' });
+  assert.deepEqual(FakeSocket.instance.lastSend, { jid:'5511999990002@s.whatsapp.net', content:{ image:Buffer.from('imagem'), mimetype:'image/png', caption:'Anexo' } });
+  assert.ok(messages.some(event => event.isFromMe && event.mediaType === 'image' && event.content === 'Anexo'));
 
   FakeSocket.instance.ev.emit('messages.update', [{ key: { id: 'message-1' }, update: { status: 3 } }]);
   assert.deepEqual(acks, [{ id: 'message-1', ack: 2 }]);
 
-  FakeSocket.instance.ev.emit('messages.upsert', { messages: [{ key: { fromMe: false, remoteJid: '5511999990001@s.whatsapp.net' }, message: { conversation: 'SAIR' } }] });
+  FakeSocket.instance.ev.emit('messages.upsert', { messages: [{ key: { id:'incoming-1', fromMe: false, remoteJid: '5511999990001@s.whatsapp.net' }, pushName:'Ana', messageTimestamp:1770000000, message: { conversation: 'Olá' } }] });
+  FakeSocket.instance.ev.emit('messages.upsert', { messages: [{ key: { id:'incoming-2', fromMe: false, remoteJid: '5511999990001@s.whatsapp.net' }, message: { conversation: 'SAIR' } }] });
+  assert.ok(messages.some(event => !event.isFromMe && event.id === 'incoming-1' && event.content === 'Olá'));
   assert.ok(optouts.some(event => event.identities.includes('5511999990001')));
   assert.ok(persisted > 0);
 
