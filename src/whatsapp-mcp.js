@@ -59,7 +59,7 @@ async function resolveRecipient({ store, transport, allowGroups }, recipient) {
   return { jid, phone, group: false };
 }
 
-function registerReadTools(server, { store }) {
+function registerReadTools(server, { memory }) {
   server.registerTool(
     'search_contacts',
     {
@@ -68,7 +68,7 @@ function registerReadTools(server, { store }) {
       inputSchema: z.object({ query: z.string().min(1).max(200) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ query }) => toolResult(store.searchWhatsAppContacts(query))
+    async ({ query }) => toolResult(memory.searchContacts(query))
   );
 
   server.registerTool(
@@ -90,7 +90,7 @@ function registerReadTools(server, { store }) {
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async args => toolResult(store.listWhatsAppMessages(args))
+    async args => toolResult(memory.listMessages(args))
   );
 
   server.registerTool(
@@ -107,7 +107,7 @@ function registerReadTools(server, { store }) {
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async args => toolResult(store.listWhatsAppChats(args))
+    async args => toolResult(memory.listChats(args))
   );
 
   server.registerTool(
@@ -121,7 +121,7 @@ function registerReadTools(server, { store }) {
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ chat_jid, include_last_message }) => toolResult(store.getWhatsAppChat(chat_jid, include_last_message))
+    async ({ chat_jid, include_last_message }) => toolResult(memory.getChat(chat_jid, include_last_message))
   );
 
   server.registerTool(
@@ -132,7 +132,7 @@ function registerReadTools(server, { store }) {
       inputSchema: z.object({ sender_phone_number: z.string().min(5).max(64) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ sender_phone_number }) => toolResult(store.getDirectWhatsAppChat(sender_phone_number))
+    async ({ sender_phone_number }) => toolResult(memory.getDirectChat(sender_phone_number))
   );
 
   server.registerTool(
@@ -147,7 +147,7 @@ function registerReadTools(server, { store }) {
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ jid, limit, page }) => toolResult(store.getWhatsAppContactChats(jid, limit, page))
+    async ({ jid, limit, page }) => toolResult(memory.getContactChats(jid, limit, page))
   );
 
   server.registerTool(
@@ -158,7 +158,7 @@ function registerReadTools(server, { store }) {
       inputSchema: z.object({ jid: z.string().min(3).max(180) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ jid }) => toolResult(store.getLastWhatsAppInteraction(jid))
+    async ({ jid }) => toolResult(memory.getLastInteraction(jid))
   );
 
   server.registerTool(
@@ -173,7 +173,7 @@ function registerReadTools(server, { store }) {
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ message_id, before, after }) => toolResult(store.getWhatsAppMessageContext(message_id, before, after))
+    async ({ message_id, before, after }) => toolResult(memory.getMessageContext(message_id, before, after))
   );
 }
 
@@ -290,6 +290,7 @@ function registerWriteTools(server, { store, transport, allowGroups, allowSend, 
 
 export function createWhatsappMcpServer({
   store,
+  memory,
   transport,
   allowGroups = process.env.WA_MCP_ALLOW_GROUPS === '1',
   allowSend = process.env.WA_MCP_ALLOW_SEND === '1',
@@ -303,13 +304,15 @@ export function createWhatsappMcpServer({
     }
   );
 
-  registerReadTools(server, { store });
+  requireValue(memory, 'Memória do WhatsApp indisponível.', 503);
+  registerReadTools(server, { memory });
   registerWriteTools(server, { store, transport, allowGroups, allowSend, onMutation });
   return server;
 }
 
 export function registerWhatsappMcp(app, {
   store,
+  memory,
   transport,
   token = process.env.WA_MCP_TOKEN,
   allowGroups = process.env.WA_MCP_ALLOW_GROUPS === '1',
@@ -325,7 +328,7 @@ export function registerWhatsappMcp(app, {
     return { enabled: false, close: async () => {} };
   }
 
-  const factory = () => createWhatsappMcpServer({ store, transport, allowGroups, allowSend, onMutation });
+  const factory = () => createWhatsappMcpServer({ store, memory, transport, allowGroups, allowSend, onMutation });
   const handler = createMcpHandler(factory, {
     legacy: 'stateless',
     responseMode: 'json',
