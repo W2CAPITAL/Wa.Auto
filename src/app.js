@@ -27,7 +27,7 @@ const legalSheetColumns = (sheet, body = {}) => ({
   djenTextColumn: sheet.headers.includes(body.djenTextColumn) ? body.djenTextColumn : headerMatch(sheet, [/djen.*resumo/, /djen.*ultimo.*resumo/]),
   lastNotifiedColumn: sheet.headers.includes(body.lastNotifiedColumn) ? body.lastNotifiedColumn : headerMatch(sheet, [/alert.*delivered/, /ultimo.*aviso/, /ultima.*notificacao/]),
 });
-export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, onMutation = () => {} }) {
+export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, whatsappMemory = null, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
@@ -59,7 +59,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     }
     next();
   });
-  registerWhatsappMcp(app, { store, transport, onMutation });
+  registerWhatsappMcp(app, { store, memory: whatsappMemory, transport, onMutation });
   app.use(express.json({ limit: '2mb' }));
   registerDossierRoutes(app);
   app.use((req, res, next) => {
