@@ -174,6 +174,16 @@ export class Store {
   legalMonitors() {
     return this.db.prepare('SELECT * FROM legal_monitors ORDER BY created_at DESC').all().map(row => ({ ...row, enabled: !!row.enabled, notify_whatsapp: !!row.notify_whatsapp }));
   }
+  legalMonitorsBySource(sourceImportId) {
+    return this.db.prepare('SELECT * FROM legal_monitors WHERE source_import_id=? ORDER BY created_at DESC').all(String(sourceImportId || ''))
+      .map(row => ({ ...row, enabled: !!row.enabled, notify_whatsapp: !!row.notify_whatsapp }));
+  }
+  setLegalNotifyBySource(sourceImportId, enabled) {
+    const source=String(sourceImportId || '');
+    const result=this.db.prepare('UPDATE legal_monitors SET notify_whatsapp=?,updated_at=? WHERE source_import_id=?')
+      .run(enabled ? 1 : 0, iso(), source);
+    return { changed:result.changes, enabled:!!enabled, source };
+  }
   updateLegalMonitor(id, values = {}) {
     const allowed = new Set([
       'client_name','phone','tribunal_alias','mode','enabled','notify_whatsapp','last_checked_at','last_event_at','last_event_hash','last_event_source','last_event_text',
