@@ -278,6 +278,110 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     res.json(await legalMonitor.trigger({ force:false }));
   });
 
+
+  const sheetPredictSource = 'sheetspredict';
+  const sheetPredictState = () => {
+    const monitors = store.legalMonitorsBySource(sheetPredictSource);
+    const waiting = monitors.reduce((n, monitor) => n + store.legalEvents(monitor.id, 500).filter(event => event.send_status === 'waiting').length, 0);
+    return {
+      ok:true,
+      autoEnabled:store.getMeta('sheetspredictAutoEnabled') === '1',
+      lastSyncAt:store.getMeta('sheetspredictLastSyncAt') || null,
+      monitored:monitors.length,
+      waiting,
+      connection:transport.snapshot(),
+      legal:legalMonitor?.snapshot?.() || store.legalStats()
+    };
+  };
+
+  app.get('/api/integrations/sheetspredict/status', (req, res) => {
+    res.json(sheetPredictState());
+  });
+
+  app.post('/api/integrations/sheetspredict/settings', (req, res) => {
+    const enabled = req.body?.autoEnabled === true;
+    store.setMeta('sheetspredictAutoEnabled', enabled ? '1' : '0');
+    const updated = store.setLegalNotifyBySource(sheetPredictSource, enabled);
+    res.json({ ...sheetPredictState(), updated:updated.changed });
+  });
+
+  app.post('/api/integrations/sheetspredict/sync', async (req, res) => {
+    requireValue(legalMonitor, 'Monitor processual indisponível.', 503);
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 250) : [];
+    requireValue(rows.length, 'Envie ao menos um processo do SheetsPredict.');
+    const autoEnabled = store.getMeta('sheetspredictAutoEnabled') === '1';
+    const mode = ['datajud','djen','both'].includes(req.body?.mode) ? req.body.mode : 'both';
+    let created = 0, invalid = 0, blocked = 0, duplicates = 0, queued = 0, baseline = 0, covered = 0;
+    const seen = new Set();
+
+    for (let index = 0; index < rows.length; index++) {
+      const raw = rows[index] || {};
+      const cnj = normalizeCnj(raw.cnj || raw.protocolo || raw.processo);
+      const { phone } = normalizePhone(raw.phone || raw.telefone || raw.whatsapp, '55');
+      if (!cnj || !phone) { invalid++; continue; }
+      const key = cnj + ':' + phone;
+      if (seen.has(key)) { duplicates++; continue; }
+      seen.add(key);
+
+      if (raw.optOut === true) {
+        store.suppress(phone, 'Opt-out sincronizado pelo SheetsPredict.');
+        blocked++;
+        continue;
+      }
+      if (store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`)) { blocked++; continue; }
+
+      const lastReturnAt = parseClientDate(raw.lastReturnAt, { endOfDay:true });
+      const nextReturnAt = parseClientDate(raw.nextReturnAt, { endOfDay:true });
+      const movementAt = parseClientDate(raw.movementAt);
+      const djenAt = parseClientDate(raw.djenAt);
+      const lastNotifiedAt = parseClientDate(raw.lastNotifiedAt);
+      const monitor = store.createLegalMonitor({
+        cnj,
+        clientName:String(raw.clientName || raw.cliente || 'Cliente').trim().slice(0,160) || 'Cliente',
+        phone,
+        tribunalAlias:resolveDataJudAlias(cnj),
+        mode,
+        notifyWhatsapp:autoEnabled && raw.notifyWhatsapp !== false,
+        lastReturnAt,
+        nextReturnAt,
+        sheetMovementAt:movementAt,
+        sheetMovementText:String(raw.movementText || '').slice(0,4000),
+        lastNotifiedAt,
+        sourceImportId:sheetPredictSource,
+        sourceSheet:'SheetsPredict/Processos',
+        sourceRow:Number(raw.sourceRow || index + 2)
+      });
+
+      const sync = legalMonitor.syncSpreadsheetSnapshot(monitor, {
+        lastReturnAt:raw.lastReturnAt,
+        nextReturnAt:raw.nextReturnAt,
+        movementAt:raw.movementAt,
+        movementText:raw.movementText,
+        djenAt:raw.djenAt,
+        djenText:raw.djenText,
+        lastNotifiedAt:raw.lastNotifiedAt,
+        sourceImportId:sheetPredictSource,
+        sourceSheet:'SheetsPredict/Processos',
+        sourceRow:Number(raw.sourceRow || index + 2)
+      });
+      queued += sync.queued;
+      baseline += sync.baseline;
+      covered += sync.covered;
+      created++;
+    }
+
+    store.setMeta('sheetspredictLastSyncAt', new Date().toISOString());
+    const delivery = autoEnabled
+      ? await legalMonitor.sendPendingNotifications({ maxGroups:1 })
+      : { sent:0, failed:0, waiting:store.pendingLegalEvents(100).length };
+
+    res.status(201).json({
+      ok:true, autoEnabled, created, invalid, blocked, duplicates, queued, baseline, covered,
+      sentNow:delivery.sent || 0, waiting:delivery.waiting || 0,
+      ...sheetPredictState()
+    });
+  });
+
   app.get('/api/suppressions', (req, res) => res.json(store.suppressions()));
   app.post('/api/suppressions', (req, res) => {
     const { phone, error } = normalizePhone(req.body.phone);
