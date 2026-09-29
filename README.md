@@ -134,6 +134,31 @@ O workflow `.github/workflows/process-monitor.yml` chama o WA.Auto a cada 30 min
 A consulta individual de um processo continua disponível pelo botão **Consultar**.
 
 > DataJud e DJEN são fontes externas. Timeout, 429, WAF ou atraso de sincronização são registrados como indisponibilidade parcial; o WA.Auto não transforma falha de consulta ou resultado vazio em afirmação de que o processo não existe.
+## Integração direta com SheetsPredict
+
+O SheetsPredict pode registrar sua carteira diretamente no monitor jurídico do WA.Auto sem reenviar um arquivo Excel.
+
+Endpoints usados pelo proxy server-side do SheetsPredict:
+
+```text
+GET  /api/integrations/sheetspredict/status
+POST /api/integrations/sheetspredict/settings
+POST /api/integrations/sheetspredict/sync
+```
+
+O `sync` aceita lotes de até 250 processos e reaproveita a mesma lógica de `LegalMonitorService` usada pelo importador normal:
+
+- CNJ + telefone identifica o monitor;
+- `Último Retorno` e `Último Aviso` formam a fronteira de novidade;
+- DataJud e DJEN já salvos no SheetsPredict podem alimentar a linha de base;
+- o scanner subsequente continua sendo o **DataJud + DJEN do próprio WA.Auto**;
+- opt-out vindo do SheetsPredict entra na lista de não contatar;
+- envio automático fica desligado por padrão;
+- ao desativar, os monitores continuam existentes, mas `notify_whatsapp=0`;
+- ao reativar, o SheetsPredict sincroniza a carteira antes de liberar os avisos.
+
+A integração não cria uma segunda sessão WhatsApp. Toda entrega continua passando pela sessão Baileys, pela deduplicação e pelo journal de envio já existentes no WA.Auto.
+
 ## Persistência cloud
 
 O filesystem de hospedagens gratuitas pode ser descartado. Por isso o WA.Auto usa o SQLite apenas como cache operacional da instância e mantém snapshots comprimidos no Supabase.
