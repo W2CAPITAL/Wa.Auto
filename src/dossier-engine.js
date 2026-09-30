@@ -1,4 +1,5 @@
-import {revisionalDossierAudit} from './revisional-skill.js';\nexport const DOSSIER_KINDS=['relatorio-executivo','dossie-juridico','due-diligence','relatorio-tecnico','pesquisa','generico'];
+import {revisionalDossierAudit} from './revisional-skill.js';
+export const DOSSIER_KINDS=['relatorio-executivo','dossie-juridico','due-diligence','relatorio-tecnico','pesquisa','generico'];
 export const DOSSIER_CLASSIFICATIONS=['publico','interno','confidencial','restrito'];
 export const REPORT_DOSSIER_CONTRACT='Estruture relatorios e dossies com titulo, resumo executivo, fatos/evidencias, analise, riscos/limitacoes, proximos passos e fontes quando existirem. Separe fatos verificados de inferencias e nao invente fontes, datas ou evidencias.';
 export const DOSSIER_EXAMPLE_MARKDOWN='# Relatorio executivo - Exemplo\n\n## Resumo executivo\nO caso exige acompanhamento e registro das proximas acoes.\n\n## Cronologia\n- 24/09/2026 - Nova movimentacao identificada.\n\n## Evidencias\n- [oficial] Publicacao localizada em fonte oficial.\n\n## Riscos\n- Medio | Informacao incompleta antes do retorno.\n\n## Plano de acao\n- Alta | Validar a publicacao antes de compartilhar.\n\n## Fontes\n- https://comunica.pje.jus.br/';
