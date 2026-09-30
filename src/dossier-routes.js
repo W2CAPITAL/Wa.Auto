@@ -1,4 +1,5 @@
-import{DOSSIER_CLASSIFICATIONS,DOSSIER_EXAMPLE_MARKDOWN,DOSSIER_KINDS,REPORT_DOSSIER_CONTRACT,dossierFileName,markdownToDossier,normalizeDossier,renderDossierHTML,validateDossier}from'./dossier-engine.js';\nimport{REVISIONAL_DOSSIER_CONTRACT}from'./revisional-skill.js';
+import{DOSSIER_CLASSIFICATIONS,DOSSIER_EXAMPLE_MARKDOWN,DOSSIER_KINDS,REPORT_DOSSIER_CONTRACT,dossierFileName,markdownToDossier,normalizeDossier,renderDossierHTML,validateDossier}from'./dossier-engine.js';
+import{REVISIONAL_DOSSIER_CONTRACT}from'./revisional-skill.js';
 const MAX_BYTES=600000,htmlCsp="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; img-src data: https:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const studioCsp="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const str=(v,n=240)=>typeof v==='string'?(v.trim().slice(0,n)||undefined):undefined;
