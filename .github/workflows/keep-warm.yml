@@ -12,6 +12,8 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    env:
+      WA_AUTO_BASE_URL: ${{ vars.WA_AUTO_BASE_URL || 'https://wa-auto-cloud.onrender.com' }}
     timeout-minutes: 6
     steps:
       - name: Acordar e validar o WA.Auto
