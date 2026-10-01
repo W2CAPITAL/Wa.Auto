@@ -117,3 +117,55 @@ test('WhatsApp cloud: logout remoto exige novo QR e QR inválido mostra erro', a
   await transport.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+
+test('WhatsApp cloud: sessão persistida e reconexão controlada', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-auto-reconnect-'));
+  const transport = new WhatsApp(dir, {
+    packageLoader: async () => fakePackage({ autoOpen: false }),
+    reconnectBaseMs: 250,
+    reconnectMaxMs: 500,
+    maxReconnectAttempts: 2,
+  });
+
+  assert.equal(transport.hasStoredAuth(), false);
+  fs.mkdirSync(path.join(dir, 'baileys-auth'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'baileys-auth', 'creds.json'), '{"registered":true}');
+  assert.equal(transport.hasStoredAuth(), true);
+
+  assert.equal(transport.scheduleReconnect('test-1'), true);
+  assert.equal(transport.snapshot().status, 'reconnecting');
+  assert.equal(transport.snapshot().reconnectAttempts, 1);
+  assert.ok(transport.snapshot().nextReconnectAt);
+
+  assert.equal(transport.scheduleReconnect('test-2'), true);
+  assert.equal(transport.snapshot().reconnectAttempts, 2);
+
+  assert.equal(transport.scheduleReconnect('test-3'), false);
+  assert.equal(transport.snapshot().status, 'stopped');
+  assert.equal(transport.snapshot().reconnectAttempts, 2);
+  assert.match(transport.snapshot().message, /reconexão automática foi pausada/i);
+
+  await transport.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('WhatsApp cloud: falha de envio agenda reconexão sem apagar credenciais', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-auto-send-reconnect-'));
+  const transport = new WhatsApp(dir, {
+    packageLoader: async () => fakePackage({ autoOpen: false }),
+    reconnectBaseMs: 250,
+    reconnectMaxMs: 250,
+    maxReconnectAttempts: 2,
+  });
+  transport.client = { end:()=>{}, ws:{ close:()=>{} } };
+  transport.state = { ...transport.state, status:'ready' };
+
+  transport.failConnection('send_error');
+  assert.equal(transport.snapshot().status, 'reconnecting');
+  assert.equal(transport.snapshot().reconnectAttempts, 1);
+  assert.equal(transport.hasStoredAuth(), false);
+
+  await transport.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
