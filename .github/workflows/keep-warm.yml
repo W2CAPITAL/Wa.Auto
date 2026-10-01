@@ -20,13 +20,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          base="${WA_AUTO_BASE_URL%/}"
           for i in $(seq 1 18); do
-            if body=$(curl --fail --show-error --silent --connect-timeout 15 --max-time 45 "https://wa-auto-cloud.onrender.com/api/health"); then
-              printf '%s\n' "$body" | tee /tmp/health.json
+            code=$(curl --show-error --silent --output /tmp/health-body --write-out "%{http_code}" --connect-timeout 15 --max-time 45 "$base/api/health" || true)
+            if [ "$code" = "200" ]; then
+              cp /tmp/health-body /tmp/health.json
+              cat /tmp/health.json
               python -c 'import json; d=json.load(open("/tmp/health.json")); assert d.get("ok") is True, d; r=d.get("resources") or {}; print("uptime:",d.get("uptime")); print("whatsapp:",d.get("whatsapp")); print("rssMb:",r.get("rssMb")); print("pressure:",r.get("pressure"))'
+              exit 0
+            fi
+            if grep -Eqi "service has been suspended|suspended by its owner" /tmp/health-body 2>/dev/null; then
+              echo "::warning::Host WA.Auto suspenso pela hospedagem; keep-warm ignorado até WA_AUTO_BASE_URL apontar para um runtime ativo."
               exit 0
             fi
             sleep 15
           done
-          echo "WA.Auto não respondeu após múltiplas tentativas."
+          echo "WA.Auto não respondeu após múltiplas tentativas em $base."
           exit 1
