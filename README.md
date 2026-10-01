@@ -272,3 +272,8 @@ Os testes normais não enviam mensagens externas. O smoke test `test:baileys-liv
 | `public/` | Interface web. |
 | `supabase/` | Schema de persistência. |
 | `tests/` | Testes automatizados. |
+
+
+## Referências técnicas
+
+A camada de estabilidade da sessão também incorpora padrões adaptados do projeto open-source **WA-AKG** de Aditya (licença MIT), especialmente a separação entre sessão encerrada voluntariamente, logout real e queda temporária, além do limite de reconexões. O WA.Auto mantém sua arquitetura própria, mais leve, com uma única sessão Baileys, SQLite operacional e snapshot remoto no Supabase; não copia a pilha Next.js/Prisma/multissessão do projeto de referência.
