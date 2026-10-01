@@ -65,6 +65,9 @@ export class WhatsApp extends EventEmitter {
     qrEncoder = (code, options) => QRCode.toDataURL(code, options),
     onPersistentChange = () => {},
     allowGroups = process.env.WA_MCP_ALLOW_GROUPS === '1',
+    reconnectBaseMs = Number(process.env.WA_RECONNECT_BASE_MS || 2500),
+    reconnectMaxMs = Number(process.env.WA_RECONNECT_MAX_MS || 60000),
+    maxReconnectAttempts = Number(process.env.WA_RECONNECT_MAX_ATTEMPTS || 8),
   } = {}) {
     super();
     this.dataDir = dataDir;
@@ -79,16 +82,74 @@ export class WhatsApp extends EventEmitter {
     this.connecting = false;
     this.manualClose = false;
     this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
+    this.reconnectBaseMs = Math.max(250, Math.min(Number(reconnectBaseMs) || 2500, 60000));
+    this.reconnectMaxMs = Math.max(this.reconnectBaseMs, Math.min(Number(reconnectMaxMs) || 60000, 300000));
+    this.maxReconnectAttempts = Math.max(1, Math.min(Number(maxReconnectAttempts) || 8, 100));
   }
 
-  snapshot() { return this.state; }
+  authDir() { return path.join(this.dataDir, 'baileys-auth'); }
+  hasStoredAuth() {
+    const creds = path.join(this.authDir(), 'creds.json');
+    try {
+      const stat = fs.statSync(creds);
+      return stat.isFile() && stat.size > 8;
+    } catch {
+      return false;
+    }
+  }
+  reconnectDelay() {
+    const attempt = Math.max(1, this.reconnectAttempts);
+    const raw = Math.min(this.reconnectMaxMs, this.reconnectBaseMs * (2 ** Math.min(attempt - 1, 8)));
+    const jitter = Math.floor(raw * 0.15 * Math.random());
+    return Math.min(this.reconnectMaxMs, raw + jitter);
+  }
+  scheduleReconnect(reason = 'connection_lost') {
+    if (this.manualClose) return false;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectAttempts += 1;
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      this.update({
+        status: 'stopped',
+        qr: null,
+        pairingCode: null,
+        account: null,
+        reconnectAttempts: this.reconnectAttempts - 1,
+        nextReconnectAt: null,
+        message: 'A conexão caiu repetidamente e a reconexão automática foi pausada. Clique em Conectar para tentar novamente.',
+        reason,
+      });
+      return false;
+    }
+    const delay = this.reconnectDelay();
+    const nextReconnectAt = new Date(Date.now() + delay).toISOString();
+    this.update({
+      status: 'reconnecting',
+      qr: null,
+      pairingCode: null,
+      account: null,
+      reconnectAttempts: this.reconnectAttempts,
+      nextReconnectAt,
+      message: `Conexão interrompida. Nova tentativa automática em cerca de ${Math.ceil(delay / 1000)}s (${this.reconnectAttempts}/${this.maxReconnectAttempts}).`,
+      reason,
+    });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect({ reconnecting: true }).catch(() => {});
+    }, delay);
+    this.reconnectTimer.unref?.();
+    return true;
+  }
+
+  snapshot() { return { ...this.state, reconnectAttempts:this.reconnectAttempts, hasStoredAuth:this.hasStoredAuth() }; }
   isReady() { return this.state.status === 'ready'; }
   update(state) { this.state = { ...this.state, ...state }; this.emit('state', this.state); }
   persistSoon() { try { this.onPersistentChange(); } catch {} }
 
-  async connect({ phoneNumber = null } = {}) {
+  async connect({ phoneNumber = null, reconnecting = false } = {}) {
     if (this.connecting || ['connecting', 'qr', 'pairing', 'authenticated', 'ready'].includes(this.state.status)) return;
     this.manualClose = false;
+    if (!reconnecting) this.reconnectAttempts = 0;
     this.connecting = true;
     clearTimeout(this.reconnectTimer);
     try {
@@ -99,7 +160,7 @@ export class WhatsApp extends EventEmitter {
       const { useMultiFileAuthState, Browsers = {}, DisconnectReason = {} } = module;
       requireValue(makeWASocket && useMultiFileAuthState, 'A integração cloud do WhatsApp não carregou corretamente.');
 
-      const authDir = path.join(this.dataDir, 'baileys-auth');
+      const authDir = this.authDir();
       fs.mkdirSync(authDir, { recursive: true });
       const { state, saveCreds } = await useMultiFileAuthState(authDir);
       const client = makeWASocket({
@@ -131,6 +192,7 @@ export class WhatsApp extends EventEmitter {
       client.ev.on('connection.update', update => {
         if (!current()) return;
         if (update.qr) {
+          this.reconnectAttempts = 0;
           void this.qrEncoder(update.qr, { margin: 2, width: 280 }).then(qr => {
             if (current() && !['authenticated', 'ready'].includes(this.state.status)) {
               this.update({ status: 'qr', qr, pairingCode: null, message: 'Escaneie com WhatsApp → Aparelhos conectados → Conectar aparelho.' });
@@ -141,6 +203,7 @@ export class WhatsApp extends EventEmitter {
         }
 
         if (update.connection === 'open') {
+          this.reconnectAttempts = 0;
           const jid = client.user?.id || '';
           this.update({
             status: 'ready',
@@ -166,12 +229,8 @@ export class WhatsApp extends EventEmitter {
               this.update({ status: 'error', qr: null, pairingCode: null, account: null, message: 'A sessão expirou e não pôde ser limpa. Use Esquecer sessão e gere outro QR Code.' });
             }
           } else {
-            this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão caiu. A fila foi pausada e a reconexão será tentada automaticamente.' });
-            if (!this.manualClose) {
-              clearTimeout(this.reconnectTimer);
-              this.reconnectTimer = setTimeout(() => void this.connect().catch(() => {}), 2500);
-              this.reconnectTimer.unref?.();
-            }
+            this.client = null;
+            this.scheduleReconnect('connection_closed');
           }
         }
       });
@@ -260,12 +319,8 @@ export class WhatsApp extends EventEmitter {
       }
     } catch (error) {
       this.client = null;
-      this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão com o WhatsApp falhou temporariamente. Você pode tentar novamente agora.' });
-      if (!this.manualClose && !phoneNumber) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = setTimeout(() => void this.connect().catch(() => {}), 5000);
-        this.reconnectTimer.unref?.();
-      }
+      this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A conexão com o WhatsApp falhou temporariamente.' });
+      if (!phoneNumber) this.scheduleReconnect('connect_error');
       throw error;
     } finally {
       this.connecting = false;
@@ -367,7 +422,8 @@ export class WhatsApp extends EventEmitter {
     this.client = null;
     if (client?.logout) await timeout(client.logout(), 15000).catch(() => {});
     ++this.generation;
-    await fs.promises.rm(path.join(this.dataDir, 'baileys-auth'), { recursive: true, force: true });
+    this.reconnectAttempts = 0;
+    await fs.promises.rm(this.authDir(), { recursive: true, force: true });
     this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'Sessão removida. Gere um novo QR Code.' });
     this.persistSoon();
   }
@@ -375,6 +431,7 @@ export class WhatsApp extends EventEmitter {
   async close() {
     clearTimeout(this.reconnectTimer);
     this.manualClose = true;
+    this.reconnectAttempts = 0;
     ++this.generation;
     const client = this.client;
     this.client = null;
