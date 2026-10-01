@@ -109,12 +109,13 @@ export class WhatsApp extends EventEmitter {
     clearTimeout(this.reconnectTimer);
     this.reconnectAttempts += 1;
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      this.reconnectAttempts = this.maxReconnectAttempts;
       this.update({
         status: 'stopped',
         qr: null,
         pairingCode: null,
         account: null,
-        reconnectAttempts: this.reconnectAttempts - 1,
+        reconnectAttempts: this.reconnectAttempts,
         nextReconnectAt: null,
         message: 'A conexão caiu repetidamente e a reconexão automática foi pausada. Clique em Conectar para tentar novamente.',
         reason,
@@ -145,6 +146,16 @@ export class WhatsApp extends EventEmitter {
   isReady() { return this.state.status === 'ready'; }
   update(state) { this.state = { ...this.state, ...state }; this.emit('state', this.state); }
   persistSoon() { try { this.onPersistentChange(); } catch {} }
+  failConnection(reason = 'transport_error') {
+    const client = this.client;
+    this.client = null;
+    ++this.generation;
+    if (client) {
+      try { client.end?.(new Error('WA.Auto reconectando')); } catch {}
+      try { client.ws?.close?.(); } catch {}
+    }
+    this.scheduleReconnect(reason);
+  }
 
   async connect({ phoneNumber = null, reconnecting = false } = {}) {
     if (this.connecting || ['connecting', 'qr', 'pairing', 'authenticated', 'ready'].includes(this.state.status)) return;
@@ -180,6 +191,7 @@ export class WhatsApp extends EventEmitter {
         qr: null,
         pairingCode: null,
         account: null,
+        nextReconnectAt: null,
         message: phoneNumber ? 'Gerando código de pareamento…' : 'Conectando ao WhatsApp…',
       });
 
@@ -222,7 +234,7 @@ export class WhatsApp extends EventEmitter {
           if (loggedOut) {
             ++this.generation;
             try {
-              fs.rmSync(path.join(this.dataDir, 'baileys-auth'), { recursive: true, force: true });
+              fs.rmSync(this.authDir(), { recursive: true, force: true });
               this.update({ status: 'disconnected', qr: null, pairingCode: null, account: null, message: 'A sessão expirou. Clique em Gerar QR Code para conectar novamente.' });
               this.persistSoon();
             } catch {
@@ -354,7 +366,7 @@ export class WhatsApp extends EventEmitter {
       this.persistSoon();
       return { id, ack: 0 };
     } catch (error) {
-      await this.close();
+      this.failConnection('send_error');
       throw error;
     }
   }
@@ -392,7 +404,7 @@ export class WhatsApp extends EventEmitter {
       this.persistSoon();
       return { id, ack: 0 };
     } catch (error) {
-      await this.close();
+      this.failConnection('send_error');
       throw error;
     }
   }
