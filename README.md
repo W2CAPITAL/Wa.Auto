@@ -10,7 +10,7 @@ O WA.Auto foi refatorado para operar como serviço **100% hospedado**. O navegad
 Navegador
    │ HTTPS
    ▼
-WA.Auto Cloud (Node.js / Render)
+WA.Auto Cloud (Node.js / runtime persistente)
    ├─ painel web + API
    ├─ fila de campanhas
    ├─ monitor DataJud + DJEN
@@ -179,13 +179,27 @@ O schema está em `supabase/wa-auto-cloud.sql`.
 
 ## Deploy
 
-O repositório contém `render.yaml` para um Web Service Node.js.
+O WA.Auto precisa de um **runtime Node.js persistente**, porque mantém uma sessão WebSocket do WhatsApp/Baileys. O repositório contém:
 
-- Build: `npm install --no-fund`
-- Start: `npm start`
-- Health check: `/api/health`
-- Node: 22
-- Plano alvo: gratuito
+- `render.yaml` para Render;
+- `railway.json` para Railway;
+- Build: `npm install --no-fund`;
+- Start: `npm start`;
+- Health check: `/api/health`;
+- Node: 22.
+
+No Railway, a configuração em código usa healthcheck e reinício `ON_FAILURE`. O servidor já escuta `process.env.PORT` em `0.0.0.0`, compatível com a plataforma.
+
+Variáveis mínimas do runtime:
+
+```dotenv
+SUPABASE_URL=...
+SUPABASE_PUBLISHABLE_KEY=...
+WA_DB_SECRET=...
+WA_PUBLIC_ORIGIN=https://SEU-HOST
+```
+
+Os workflows agendados usam a variável de repositório `WA_AUTO_BASE_URL`. Se ela não existir, usam o endereço Render legado. Depois de uma migração, defina `WA_AUTO_BASE_URL` para o novo domínio sem alterar código.
 
 O frontend e a API são servidos pela **mesma origem**, então não há ponte Vercel → localhost, CORS para `127.0.0.1` ou Private Network Access.
 
