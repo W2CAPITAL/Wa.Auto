@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log*
+.env
+.env.*
+!.env.example
+.git
+.github
+test-results
+coverage
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+data
+tmp
