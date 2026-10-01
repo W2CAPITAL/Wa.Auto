@@ -34,6 +34,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir container
+        run: docker build --pull -t wa-auto:test .
+      - name: Conferir healthcheck configurado
+        run: docker inspect wa-auto:test --format '{{json .Config.Healthcheck}}' | grep -q '/api/health'
+
   whatsapp-cloud:
     runs-on: ubuntu-latest
     timeout-minutes: 5
