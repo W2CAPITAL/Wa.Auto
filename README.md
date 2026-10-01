@@ -181,6 +181,7 @@ O schema está em `supabase/wa-auto-cloud.sql`.
 
 O WA.Auto precisa de um **runtime Node.js persistente**, porque mantém uma sessão WebSocket do WhatsApp/Baileys. O repositório contém:
 
+- `Dockerfile` + `docs/NORTHFLANK_FREE.md` para **Northflank Sandbox** (alternativa gratuita always-on);
 - `render.yaml` para Render;
 - `railway.json` para Railway;
 - Build: `npm install --no-fund`;
@@ -188,7 +189,7 @@ O WA.Auto precisa de um **runtime Node.js persistente**, porque mantém uma sess
 - Health check: `/api/health`;
 - Node: 22.
 
-No Railway, a configuração em código usa healthcheck e reinício `ON_FAILURE`. O servidor já escuta `process.env.PORT` em `0.0.0.0`, compatível com a plataforma.
+No Northflank, o `Dockerfile` expõe a porta 10000 e inclui healthcheck em `/api/health`. No Railway, a configuração em código usa healthcheck e reinício `ON_FAILURE`. O servidor já escuta `process.env.PORT` em `0.0.0.0`, compatível com a plataforma.
 
 Variáveis mínimas do runtime:
 
