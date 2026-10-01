@@ -126,7 +126,11 @@ const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, wh
 const port = Number(process.env.PORT || 10000);
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`\nWA.Auto Cloud está pronto na porta ${port}.\n`);
-  setImmediate(() => void transport.connect().catch(error => console.error('Falha ao iniciar conexão do WhatsApp:', error.message)));
+  if (transport.hasStoredAuth()) {
+    setImmediate(() => void transport.connect().catch(error => console.error('Falha ao restaurar conexão do WhatsApp:', error.message)));
+  } else {
+    console.log('Nenhuma sessão WhatsApp persistida. Aguardando QR ou código de pareamento solicitado pelo usuário.');
+  }
   setTimeout(() => void runOneOffReturnFromEnv(), 1500).unref?.();
 });
 server.on('error', error => {
