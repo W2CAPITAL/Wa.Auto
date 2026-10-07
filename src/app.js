@@ -30,6 +30,18 @@ const legalSheetColumns = (sheet, body = {}) => ({
 export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, whatsappMemory = null, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
+  const integrationToken = String(process.env.WA_INTEGRATION_TOKEN || process.env.WA_MCP_TOKEN || '').trim();
+  const integrationAuthorized = req => {
+    if (!integrationToken) return false;
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    const direct = String(req.headers['x-wa-integration-token'] || '').trim();
+    return bearer === integrationToken || direct === integrationToken;
+  };
+  const requireLexisIntegration = (req, res, next) => {
+    if (!integrationToken) return res.status(503).json({ error: 'WA_INTEGRATION_TOKEN/WA_MCP_TOKEN não configurado.' });
+    if (!integrationAuthorized(req)) return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
+    next();
+  };
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
   app.disable('x-powered-by');
   app.set('trust proxy', true);
@@ -54,7 +66,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
     if (origin && origin !== requestOrigin && (!configuredOrigin || origin !== configuredOrigin)) return res.status(403).json({ error: 'Origem não permitida.' });
 
-    if (isMutation && req.headers['x-wa-csrf'] !== csrfToken) {
+    if (isMutation && !integrationAuthorized(req) && req.headers['x-wa-csrf'] !== csrfToken) {
       return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
     }
     next();
@@ -380,6 +392,65 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
       sentNow:delivery.sent || 0, waiting:delivery.waiting || 0,
       ...sheetPredictState()
     });
+  });
+
+  // Integração server-to-server do LexisPredict.
+  // Usa a MESMA sessão Baileys do WA.Auto; não cria outro cliente WhatsApp.
+  app.get('/api/integrations/lexispredict/status', requireLexisIntegration, (req, res) => {
+    res.json({
+      ok: true,
+      service: 'WA.Auto',
+      connection: transport.snapshot(),
+      memory: whatsappMemory?.stats?.() || null,
+      busy: queue.busy,
+      legal: legalMonitor?.snapshot?.() || store.legalStats(),
+    });
+  });
+
+  app.get('/api/integrations/lexispredict/chats', requireLexisIntegration, (req, res) => {
+    requireValue(whatsappMemory, 'Memória do WhatsApp indisponível.', 503);
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 100));
+    const page = Math.max(0, Number(req.query.page) || 0);
+    const onlyGroups = String(req.query.onlyGroups || '') === '1';
+    const rows = whatsappMemory
+      .listChats({ query: req.query.q || null, limit, page, include_last_message: true })
+      .filter(row => !onlyGroups || row.is_group);
+    res.json({ ok: true, chats: rows });
+  });
+
+  app.get('/api/integrations/lexispredict/messages', requireLexisIntegration, (req, res) => {
+    requireValue(whatsappMemory, 'Memória do WhatsApp indisponível.', 503);
+    const jid = String(req.query.jid || '').trim();
+    requireValue(jid, 'Informe o jid do chat.');
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 80, 100));
+    const rows = whatsappMemory.listMessages({
+      chat_jid: jid,
+      limit,
+      page: 0,
+      include_context: false,
+    });
+    res.json({ ok: true, messages: rows });
+  });
+
+  app.post('/api/integrations/lexispredict/send', requireLexisIntegration, async (req, res) => {
+    requireValue(transport.isReady(), 'WhatsApp desconectado no WA.Auto.', 409);
+    const rawTo = String(req.body?.to || req.body?.phone || '').trim();
+    const message = String(req.body?.message || '').trim();
+    requireValue(message && message.length <= 8000, 'Confira a mensagem.');
+
+    let jid = '';
+    if (/@g\.us$/i.test(rawTo)) {
+      jid = rawTo;
+    } else {
+      const { phone, error } = normalizePhone(rawTo, '55');
+      requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
+      requireValue(!store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`), 'Este telefone está na lista de não contatar.');
+      jid = await transport.resolve(phone);
+      requireValue(jid, 'Este número não foi encontrado no WhatsApp.', 404);
+    }
+
+    const sent = await transport.send(jid, message);
+    res.status(201).json({ ok: true, provider: 'waauto', jid, ...sent });
   });
 
   app.get('/api/suppressions', (req, res) => res.json(store.suppressions()));
