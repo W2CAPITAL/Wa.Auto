@@ -43,40 +43,54 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
 
   const lexisAuthorization = async req => {
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-    if (!bearer || (integrationToken && bearer === integrationToken)) return null;
+    if (!bearer || (integrationToken && bearer === integrationToken)) {
+      return { ok:false, error:'missing_bearer' };
+    }
     try {
       const response = await fetch(LEXIS_AUTH_URL, {
         headers: { Authorization: `Bearer ${bearer}` },
         signal: AbortSignal.timeout(8000),
       });
-      if (!response.ok) return null;
-      const data = await response.json();
-      return data?.ok ? data : null;
-    } catch {
-      return null;
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok) {
+        return {
+          ok:false,
+          error:String(data?.error || `lexis_auth_http_${response.status}`),
+        };
+      }
+      return { ok:true, data };
+    } catch (error) {
+      console.warn('[lexis-auth] indisponível', error?.message || error);
+      return { ok:false, error:'lexis_auth_unreachable' };
     }
   };
 
   const requireLexisIntegration = async (req, res, next) => {
     if (integrationAuthorized(req)) return next();
     const authorization = await lexisAuthorization(req);
-    if (!authorization) {
-      return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
+    if (!authorization.ok) {
+      return res.status(401).json({
+        error: 'Integração LexisPredict não autorizada.',
+        code: authorization.error,
+      });
     }
-    req.lexisAuthorization = authorization;
+    req.lexisAuthorization = authorization.data;
     return next();
   };
 
   const requireLexisManager = async (req, res, next) => {
     if (integrationAuthorized(req)) return next();
     const authorization = await lexisAuthorization(req);
-    if (!authorization) {
-      return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
+    if (!authorization.ok) {
+      return res.status(401).json({
+        error: 'Integração LexisPredict não autorizada.',
+        code: authorization.error,
+      });
     }
-    if (!authorization.canManage) {
+    if (!authorization.data.canManage) {
       return res.status(403).json({ error: 'Somente Supervisor, Administrador ou Superadmin pode gerenciar a sessão do WhatsApp.' });
     }
-    req.lexisAuthorization = authorization;
+    req.lexisAuthorization = authorization.data;
     return next();
   };
 
