@@ -31,12 +31,8 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const integrationToken = String(process.env.WA_INTEGRATION_TOKEN || process.env.WA_MCP_TOKEN || '').trim();
-  const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
-  const supabasePublicKey = String(
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    ''
-  ).trim();
+  const LEXIS_AUTH_URL =
+    "https://lexispredict.vercel.app/api/integration/wa-auto/auth";
 
   const integrationAuthorized = req => {
     if (!integrationToken) return false;
@@ -45,30 +41,45 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     return bearer === integrationToken || direct === integrationToken;
   };
 
-  const lexisUserAuthorized = async req => {
-    if (!supabaseUrl || !supabasePublicKey) return false;
+  const lexisAuthorization = async req => {
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-    if (!bearer || (integrationToken && bearer === integrationToken)) return false;
+    if (!bearer || (integrationToken && bearer === integrationToken)) return null;
     try {
-      const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
-        headers: {
-          apikey: supabasePublicKey,
-          Authorization: `Bearer ${bearer}`,
-        },
+      const response = await fetch(LEXIS_AUTH_URL, {
+        headers: { Authorization: `Bearer ${bearer}` },
         signal: AbortSignal.timeout(8000),
       });
-      if (!response.ok) return false;
-      const user = await response.json();
-      return Boolean(user?.id);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.ok ? data : null;
     } catch {
-      return false;
+      return null;
     }
   };
 
   const requireLexisIntegration = async (req, res, next) => {
-    if (integrationAuthorized(req) || await lexisUserAuthorized(req)) return next();
-    return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
+    if (integrationAuthorized(req)) return next();
+    const authorization = await lexisAuthorization(req);
+    if (!authorization) {
+      return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
+    }
+    req.lexisAuthorization = authorization;
+    return next();
   };
+
+  const requireLexisManager = async (req, res, next) => {
+    if (integrationAuthorized(req)) return next();
+    const authorization = await lexisAuthorization(req);
+    if (!authorization) {
+      return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
+    }
+    if (!authorization.canManage) {
+      return res.status(403).json({ error: 'Somente Supervisor, Administrador ou Superadmin pode gerenciar a sessão do WhatsApp.' });
+    }
+    req.lexisAuthorization = authorization;
+    return next();
+  };
+
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
   app.disable('x-powered-by');
   app.set('trust proxy', true);
@@ -463,12 +474,12 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     });
   });
 
-  app.post('/api/integrations/lexispredict/connect', requireLexisIntegration, async (req, res) => {
+  app.post('/api/integrations/lexispredict/connect', requireLexisManager, async (req, res) => {
     await transport.connect();
     res.json({ ok: true, connection: transport.snapshot() });
   });
 
-  app.post('/api/integrations/lexispredict/pair', requireLexisIntegration, async (req, res) => {
+  app.post('/api/integrations/lexispredict/pair', requireLexisManager, async (req, res) => {
     const { phone, error } = normalizePhone(req.body?.phone, '55');
     requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
     await transport.close();
@@ -476,7 +487,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     res.json({ ok: true, connection: transport.snapshot() });
   });
 
-  app.post('/api/integrations/lexispredict/logout', requireLexisIntegration, async (req, res) => {
+  app.post('/api/integrations/lexispredict/logout', requireLexisManager, async (req, res) => {
     await transport.logout();
     res.json({ ok: true, connection: transport.snapshot() });
   });
