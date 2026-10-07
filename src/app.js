@@ -31,16 +31,43 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const integrationToken = String(process.env.WA_INTEGRATION_TOKEN || process.env.WA_MCP_TOKEN || '').trim();
+  const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  const supabasePublicKey = String(
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+
   const integrationAuthorized = req => {
     if (!integrationToken) return false;
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     const direct = String(req.headers['x-wa-integration-token'] || '').trim();
     return bearer === integrationToken || direct === integrationToken;
   };
-  const requireLexisIntegration = (req, res, next) => {
-    if (!integrationToken) return res.status(503).json({ error: 'WA_INTEGRATION_TOKEN/WA_MCP_TOKEN não configurado.' });
-    if (!integrationAuthorized(req)) return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
-    next();
+
+  const lexisUserAuthorized = async req => {
+    if (!supabaseUrl || !supabasePublicKey) return false;
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!bearer || (integrationToken && bearer === integrationToken)) return false;
+    try {
+      const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          apikey: supabasePublicKey,
+          Authorization: `Bearer ${bearer}`,
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) return false;
+      const user = await response.json();
+      return Boolean(user?.id);
+    } catch {
+      return false;
+    }
+  };
+
+  const requireLexisIntegration = async (req, res, next) => {
+    if (integrationAuthorized(req) || await lexisUserAuthorized(req)) return next();
+    return res.status(401).json({ error: 'Integração LexisPredict não autorizada.' });
   };
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
   app.disable('x-powered-by');
@@ -63,10 +90,39 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     const requestOrigin = host ? `${protocol}://${host}` : '';
     const configuredOrigin = String(process.env.WA_PUBLIC_ORIGIN || '').replace(/\/$/, '');
 
-    if (req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).json({ error: 'Origem não permitida.' });
-    if (origin && origin !== requestOrigin && (!configuredOrigin || origin !== configuredOrigin)) return res.status(403).json({ error: 'Origem não permitida.' });
+    const isLexisBridge = req.path.startsWith('/api/integrations/lexispredict/');
+    const lexisOrigins = new Set([
+      'https://lexispredict.vercel.app',
+      'https://private-assecom.vercel.app',
+    ]);
+    const lexisOriginAllowed = !!origin && lexisOrigins.has(origin);
 
-    if (isMutation && !integrationAuthorized(req) && req.headers['x-wa-csrf'] !== csrfToken) {
+    if (req.headers['sec-fetch-site'] === 'cross-site' && !(isLexisBridge && lexisOriginAllowed)) {
+      return res.status(403).json({ error: 'Origem não permitida.' });
+    }
+    if (
+      origin &&
+      origin !== requestOrigin &&
+      (!configuredOrigin || origin !== configuredOrigin) &&
+      !(isLexisBridge && lexisOriginAllowed)
+    ) {
+      return res.status(403).json({ error: 'Origem não permitida.' });
+    }
+
+    if (isLexisBridge && lexisOriginAllowed) {
+      res.set('Access-Control-Allow-Origin', origin);
+      res.set('Vary', 'Origin');
+      res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-WA-Integration-Token');
+      res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      if (req.method === 'OPTIONS') return res.status(204).end();
+    }
+
+    if (
+      isMutation &&
+      !isLexisBridge &&
+      !integrationAuthorized(req) &&
+      req.headers['x-wa-csrf'] !== csrfToken
+    ) {
       return res.status(403).json({ error: 'Atualize a página e tente novamente.' });
     }
     next();
@@ -405,6 +461,24 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
       busy: queue.busy,
       legal: legalMonitor?.snapshot?.() || store.legalStats(),
     });
+  });
+
+  app.post('/api/integrations/lexispredict/connect', requireLexisIntegration, async (req, res) => {
+    await transport.connect();
+    res.json({ ok: true, connection: transport.snapshot() });
+  });
+
+  app.post('/api/integrations/lexispredict/pair', requireLexisIntegration, async (req, res) => {
+    const { phone, error } = normalizePhone(req.body?.phone, '55');
+    requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
+    await transport.close();
+    await transport.connect({ phoneNumber: phone });
+    res.json({ ok: true, connection: transport.snapshot() });
+  });
+
+  app.post('/api/integrations/lexispredict/logout', requireLexisIntegration, async (req, res) => {
+    await transport.logout();
+    res.json({ ok: true, connection: transport.snapshot() });
   });
 
   app.get('/api/integrations/lexispredict/chats', requireLexisIntegration, (req, res) => {
