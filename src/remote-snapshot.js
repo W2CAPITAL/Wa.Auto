@@ -31,7 +31,10 @@ function unpack(root, files) {
 export class RemoteSnapshot {
   constructor({
     url = process.env.SUPABASE_URL,
-    key = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY,
+    key =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_PUBLISHABLE_KEY,
     secret = process.env.WA_DB_SECRET,
     fetchImpl = fetch,
   } = {}) {
@@ -103,7 +106,7 @@ export class RemoteSnapshot {
   }
 
   async restore(dataDir) {
-    if (!this.configured) throw new Error('Hospedagem cloud sem persistência configurada. Defina SUPABASE_URL, SUPABASE_ANON_KEY e WA_DB_SECRET.');
+    if (!this.configured) throw new Error('Hospedagem cloud sem persistência configurada. Defina SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (preferencial) ou SUPABASE_ANON_KEY, e WA_DB_SECRET.');
     const response = await this.fetch(`${this.url}/rest/v1/wa_auto_snapshots?id=eq.default&select=payload&limit=1`, {
       headers: this.headers({ Accept: 'application/json' }),
     });
