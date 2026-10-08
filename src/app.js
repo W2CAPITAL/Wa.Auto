@@ -27,7 +27,7 @@ const legalSheetColumns = (sheet, body = {}) => ({
   djenTextColumn: sheet.headers.includes(body.djenTextColumn) ? body.djenTextColumn : headerMatch(sheet, [/djen.*resumo/, /djen.*ultimo.*resumo/]),
   lastNotifiedColumn: sheet.headers.includes(body.lastNotifiedColumn) ? body.lastNotifiedColumn : headerMatch(sheet, [/alert.*delivered/, /ultimo.*aviso/, /ultima.*notificacao/]),
 });
-export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, whatsappMemory = null, onMutation = () => {} }) {
+export function createApp({ store, transport, queue, legalMonitor = null, resourceGuard = null, whatsappMemory = null, lexisSessions = null, onMutation = () => {} }) {
   const app = express();
   const csrfToken = randomBytes(32).toString('hex');
   const integrationToken = String(process.env.WA_INTEGRATION_TOKEN || process.env.WA_MCP_TOKEN || '').trim();
@@ -78,7 +78,10 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
       // /api/integration/wa-auto/auth validou o JWT no Supabase. A produção antiga
       // pode falhar no SELECT do perfil por schema/RLS legado. Nesse caso a sessão
       // já foi autenticada; usamos somente claims do MESMO token validado.
-      if (response.status === 403 && data?.error === 'profile_not_allowed') {
+      if (
+        (response.status === 403 && data?.error === 'profile_not_allowed') ||
+        (response.status === 503 && data?.error === 'profile_lookup_failed')
+      ) {
         const claims = decodeJwtPayload(bearer);
         const email = String(claims?.email || '').trim().toLowerCase();
         const sub = String(claims?.sub || '').trim();
@@ -86,10 +89,8 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
         if (!sub || !email || !exp || exp * 1000 <= Date.now()) {
           return { ok:false, error:'legacy_session_invalid' };
         }
-        const canManage = legacyManagerEmails.has(email);
         console.warn('[lexis-auth] legacy profile compatibility', {
           userId: sub,
-          canManage,
         });
         return {
           ok:true,
@@ -97,8 +98,8 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
             ok:true,
             userId:sub,
             empresaId:null,
-            role:canManage ? 'Supervisor' : 'Operador',
-            canManage,
+            role:'Operador',
+            canManage:true,
             legacyProfileCompatibility:true,
           },
         };
@@ -115,9 +116,27 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
   };
 
   const requireLexisIntegration = async (req, res, next) => {
-    if (integrationAuthorized(req)) return next();
+    if (integrationAuthorized(req)) {
+      const userId = String(req.headers['x-lexis-user-id'] || '').trim();
+      if (!userId) {
+        return res.status(400).json({
+          error: 'Informe o usuário LexisPredict para a sessão WhatsApp.',
+          code: 'missing_lexis_user_id',
+        });
+      }
+      req.lexisAuthorization = {
+        ok:true,
+        userId,
+        empresaId:null,
+        role:'Service',
+        canManage:true,
+      };
+      return next();
+    }
+
     const authorization = await lexisAuthorization(req);
     if (!authorization.ok) {
+      console.warn('[lexis-auth] bridge negado', authorization.error);
       return res.status(401).json({
         error: 'Integração LexisPredict não autorizada.',
         code: authorization.error,
@@ -127,20 +146,11 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     return next();
   };
 
-  const requireLexisManager = async (req, res, next) => {
-    if (integrationAuthorized(req)) return next();
-    const authorization = await lexisAuthorization(req);
-    if (!authorization.ok) {
-      return res.status(401).json({
-        error: 'Integração LexisPredict não autorizada.',
-        code: authorization.error,
-      });
-    }
-    if (!authorization.data.canManage) {
-      return res.status(403).json({ error: 'Somente Supervisor, Administrador ou Superadmin pode gerenciar a sessão do WhatsApp.' });
-    }
-    req.lexisAuthorization = authorization.data;
-    return next();
+  const userSession = req => {
+    requireValue(lexisSessions, 'Sessões individuais do LexisPredict indisponíveis.', 503);
+    const userId = String(req.lexisAuthorization?.userId || '').trim();
+    requireValue(userId, 'Usuário LexisPredict não identificado.', 401);
+    return lexisSessions.get(userId);
   };
 
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1, fields: 0 } });
@@ -186,7 +196,7 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     if (isLexisBridge && lexisOriginAllowed) {
       res.set('Access-Control-Allow-Origin', origin);
       res.set('Vary', 'Origin');
-      res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-WA-Integration-Token');
+      res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-WA-Integration-Token, X-Lexis-User-Id');
       res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
       if (req.method === 'OPTIONS') return res.status(204).end();
     }
@@ -524,64 +534,75 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     });
   });
 
-  // Integração server-to-server do LexisPredict.
-  // Usa a MESMA sessão Baileys do WA.Auto; não cria outro cliente WhatsApp.
+  // Integração LexisPredict: uma sessão Baileys por usuário autenticado.
+  // O WA.Auto legado continua usando o transporte global acima; o Lexis não.
   app.get('/api/integrations/lexispredict/status', requireLexisIntegration, (req, res) => {
+    const session = userSession(req);
     res.json({
       ok: true,
       service: 'WA.Auto',
-      connection: transport.snapshot(),
-      memory: whatsappMemory?.stats?.() || null,
-      busy: queue.busy,
-      legal: legalMonitor?.snapshot?.() || store.legalStats(),
+      userScoped: true,
+      connection: session.transport.snapshot(),
+      memory: session.memory.stats(),
+      sessions: lexisSessions?.stats?.() || null,
     });
   });
 
-  app.post('/api/integrations/lexispredict/connect', requireLexisManager, async (req, res) => {
-    await transport.connect();
-    res.json({ ok: true, connection: transport.snapshot() });
+  app.post('/api/integrations/lexispredict/connect', requireLexisIntegration, async (req, res) => {
+    const session = userSession(req);
+    await session.transport.connect();
+    res.json({ ok: true, userScoped: true, connection: session.transport.snapshot() });
   });
 
-  app.post('/api/integrations/lexispredict/pair', requireLexisManager, async (req, res) => {
+  app.post('/api/integrations/lexispredict/pair', requireLexisIntegration, async (req, res) => {
+    const session = userSession(req);
     const { phone, error } = normalizePhone(req.body?.phone, '55');
     requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
-    await transport.close();
-    await transport.connect({ phoneNumber: phone });
-    res.json({ ok: true, connection: transport.snapshot() });
+
+    if (session.transport.hasStoredAuth()) {
+      await session.transport.logout().catch(() => session.transport.close());
+    } else {
+      await session.transport.close();
+    }
+    await session.transport.connect({ phoneNumber: phone });
+    res.json({ ok: true, userScoped: true, connection: session.transport.snapshot() });
   });
 
-  app.post('/api/integrations/lexispredict/logout', requireLexisManager, async (req, res) => {
-    await transport.logout();
-    res.json({ ok: true, connection: transport.snapshot() });
+  app.post('/api/integrations/lexispredict/logout', requireLexisIntegration, async (req, res) => {
+    const session = userSession(req);
+    await session.transport.logout();
+    res.json({ ok: true, userScoped: true, connection: session.transport.snapshot() });
   });
 
   app.get('/api/integrations/lexispredict/chats', requireLexisIntegration, (req, res) => {
-    requireValue(whatsappMemory, 'Memória do WhatsApp indisponível.', 503);
+    const session = userSession(req);
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 100));
     const page = Math.max(0, Number(req.query.page) || 0);
     const onlyGroups = String(req.query.onlyGroups || '') === '1';
-    const rows = whatsappMemory
+    const rows = session.memory
       .listChats({ query: req.query.q || null, limit, page, include_last_message: true })
       .filter(row => !onlyGroups || row.is_group);
-    res.json({ ok: true, chats: rows });
+    res.json({ ok: true, userScoped: true, chats: rows });
   });
 
   app.get('/api/integrations/lexispredict/messages', requireLexisIntegration, (req, res) => {
-    requireValue(whatsappMemory, 'Memória do WhatsApp indisponível.', 503);
+    const session = userSession(req);
     const jid = String(req.query.jid || '').trim();
     requireValue(jid, 'Informe o jid do chat.');
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 80, 100));
-    const rows = whatsappMemory.listMessages({
+    const rows = session.memory.listMessages({
       chat_jid: jid,
       limit,
       page: 0,
       include_context: false,
     });
-    res.json({ ok: true, messages: rows });
+    res.json({ ok: true, userScoped: true, messages: rows });
   });
 
   app.post('/api/integrations/lexispredict/send', requireLexisIntegration, async (req, res) => {
-    requireValue(transport.isReady(), 'WhatsApp desconectado no WA.Auto.', 409);
+    const session = userSession(req);
+    const userTransport = session.transport;
+    requireValue(userTransport.isReady(), 'Seu WhatsApp está desconectado. Conecte pelo LexisPredict.', 409);
     const rawTo = String(req.body?.to || req.body?.phone || '').trim();
     const message = String(req.body?.message || '').trim();
     requireValue(message && message.length <= 8000, 'Confira a mensagem.');
@@ -593,12 +614,12 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
       const { phone, error } = normalizePhone(rawTo, '55');
       requireValue(phone && !error, error || 'Informe um telefone válido com DDD.');
       requireValue(!store.isBlocked(phone, `${phone}@s.whatsapp.net`, `${phone}@c.us`), 'Este telefone está na lista de não contatar.');
-      jid = await transport.resolve(phone);
+      jid = await userTransport.resolve(phone);
       requireValue(jid, 'Este número não foi encontrado no WhatsApp.', 404);
     }
 
-    const sent = await transport.send(jid, message);
-    res.status(201).json({ ok: true, provider: 'waauto', jid, ...sent });
+    const sent = await userTransport.send(jid, message);
+    res.status(201).json({ ok: true, userScoped: true, provider: 'waauto', jid, ...sent });
   });
 
   app.get('/api/suppressions', (req, res) => res.json(store.suppressions()));

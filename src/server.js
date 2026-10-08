@@ -10,6 +10,7 @@ import { LegalMonitorService } from './legal-monitor.js';
 import { ResourceGuard } from './resource-guard.js';
 import { normalizePhone } from './phone.js';
 import { WhatsAppMemory } from './whatsapp-memory.js';
+import { LexisSessionManager } from './lexis-sessions.js';
 
 const dataDir = path.resolve(process.env.WA_DATA_DIR || path.join(os.tmpdir(), 'wa-auto-cloud'));
 fs.mkdirSync(dataDir, { recursive: true });
@@ -66,6 +67,9 @@ store.pruneHistory(retentionDays());
 
 const persist = () => snapshot.schedule(dataDir, store);
 const resourceGuard = new ResourceGuard();
+const lexisSessions = new LexisSessionManager(path.join(dataDir, 'lexis-sessions'), {
+  onPersistentChange: persist,
+});
 const transport = new WhatsApp(dataDir, { onPersistentChange: persist });
 transport.on('state', state => console.log(`WhatsApp state: ${state.status}`));
 transport.on('message', message => { whatsappMemory.record(message); persist(); });
@@ -122,7 +126,7 @@ async function runOneOffReturnFromEnv() {
 }
 
 
-const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, whatsappMemory, onMutation: persist });
+const app = createApp({ store, transport, queue, legalMonitor, resourceGuard, whatsappMemory, lexisSessions, onMutation: persist });
 const port = Number(process.env.PORT || 10000);
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`\nWA.Auto Cloud está pronto na porta ${port}.\n`);
@@ -170,6 +174,7 @@ async function shutdown() {
   const deadline = setTimeout(() => process.exit(1), 20000);
   deadline.unref();
   await queue.close();
+  await lexisSessions.closeAll().catch(() => {});
   await snapshot.close(dataDir, store).catch(error => console.error('Falha ao salvar estado final:', error.message));
   if (!queue.busy) store.close();
   process.exit(0);
