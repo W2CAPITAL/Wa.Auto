@@ -41,6 +41,24 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     return bearer === integrationToken || direct === integrationToken;
   };
 
+  const decodeJwtPayload = token => {
+    try {
+      const part = String(token || '').split('.')[1] || '';
+      if (!part) return null;
+      const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=');
+      return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    } catch {
+      return null;
+    }
+  };
+
+  const legacyManagerEmails = new Set(
+    String(process.env.LEXIS_MANAGER_EMAILS || '')
+      .split(',')
+      .map(value => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
   const lexisAuthorization = async req => {
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!bearer || (integrationToken && bearer === integrationToken)) {
@@ -52,13 +70,44 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
         signal: AbortSignal.timeout(8000),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok) {
+      if (response.ok && data?.ok) {
+        return { ok:true, data };
+      }
+
+      // Compatibilidade W1 antiga: profile_not_allowed ocorre somente depois que
+      // /api/integration/wa-auto/auth validou o JWT no Supabase. A produção antiga
+      // pode falhar no SELECT do perfil por schema/RLS legado. Nesse caso a sessão
+      // já foi autenticada; usamos somente claims do MESMO token validado.
+      if (response.status === 403 && data?.error === 'profile_not_allowed') {
+        const claims = decodeJwtPayload(bearer);
+        const email = String(claims?.email || '').trim().toLowerCase();
+        const sub = String(claims?.sub || '').trim();
+        const exp = Number(claims?.exp || 0);
+        if (!sub || !email || !exp || exp * 1000 <= Date.now()) {
+          return { ok:false, error:'legacy_session_invalid' };
+        }
+        const canManage = legacyManagerEmails.has(email);
+        console.warn('[lexis-auth] legacy profile compatibility', {
+          userId: sub,
+          canManage,
+        });
         return {
-          ok:false,
-          error:String(data?.error || `lexis_auth_http_${response.status}`),
+          ok:true,
+          data:{
+            ok:true,
+            userId:sub,
+            empresaId:null,
+            role:canManage ? 'Supervisor' : 'Operador',
+            canManage,
+            legacyProfileCompatibility:true,
+          },
         };
       }
-      return { ok:true, data };
+
+      return {
+        ok:false,
+        error:String(data?.error || `lexis_auth_http_${response.status}`),
+      };
     } catch (error) {
       console.warn('[lexis-auth] indisponível', error?.message || error);
       return { ok:false, error:'lexis_auth_unreachable' };
