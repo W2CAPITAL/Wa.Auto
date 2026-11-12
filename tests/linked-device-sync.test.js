@@ -17,3 +17,10 @@ test('connected device history and later decrypt updates are both observed',()=>
  assert.match(read('src/lexis-sessions.js'),/memory\.acknowledge/);
  assert.match(read('src/server.js'),/whatsappMemory\.acknowledge/);
 });
+
+test('linked-device retention is bounded to avoid unbounded free-host storage',()=>{
+ const sessions=readFileSync(new URL('../src/lexis-sessions.js',import.meta.url),'utf8');
+ const server=readFileSync(new URL('../src/server.js',import.meta.url),'utf8');
+ assert.match(sessions,/prune\(days=30\)/);
+ assert.match(server,/lexisSessions\.prune\(retentionDays\(\)\)/);
+});

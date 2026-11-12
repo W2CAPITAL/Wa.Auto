@@ -159,7 +159,8 @@ resourceTimer.unref?.();
 const pruneTimer = setInterval(() => {
   const removed = store.pruneHistory(retentionDays());
   const waRemoved = whatsappMemory.prune(retentionDays());
-  if (removed.legalScrubbed || removed.campaigns || waRemoved.messages || waRemoved.chats) persist();
+  const linkedRemoved=lexisSessions.prune(retentionDays());
+  if (removed.legalScrubbed || removed.campaigns || waRemoved.messages || waRemoved.chats || linkedRemoved.messages) persist();
 }, 6 * 60 * 60 * 1000);
 pruneTimer.unref?.();
 

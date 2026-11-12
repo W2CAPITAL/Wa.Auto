@@ -135,6 +135,16 @@ export class LexisSessionManager {
     this.sessions.clear();
   }
 
+  prune(days=30) {
+    let removed=0;
+    for(const session of this.sessions.values()){
+      const pruned=session.memory.prune(days);
+      removed+=Number(pruned.messages||0);
+    }
+    if(removed)this.touch();
+    return {messages:removed};
+  }
+
   stats() {
     const sessions = [...this.sessions.values()];
     return {
