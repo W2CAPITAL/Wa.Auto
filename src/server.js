@@ -74,6 +74,7 @@ const transport = new WhatsApp(dataDir, { onPersistentChange: persist });
 transport.on('state', state => console.log(`WhatsApp state: ${state.status}`));
 transport.on('message', message => { whatsappMemory.record(message); persist(); });
 transport.on('contact', contact => { whatsappMemory.upsertContact(contact); persist(); });
+transport.on('ack', ({id,ack}) => { if (whatsappMemory.acknowledge(id,ack)) persist(); });
 const queue = new Queue(store, transport, { resourceGuard, criticalIntent:snapshot });
 queue.on('change', persist);
 queue.on('queueError', persist);

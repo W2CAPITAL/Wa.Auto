@@ -255,6 +255,13 @@ export class WhatsApp extends EventEmitter {
           if (!id || !Number.isFinite(status)) continue;
           const ack = status <= 0 ? -1 : status >= 4 ? 3 : status === 3 ? 2 : status >= 2 ? 1 : 0;
           if (ack) this.emit('ack', { id, ack });
+          // A mensagem pode chegar decriptada depois do primeiro placeholder.
+          const chatJid=normalizeJid(item?.key?.remoteJid);
+          const content=item?.update?.message ? messageText({message:item.update.message}) : '';
+          if (content && (/(@s\\.whatsapp\\.net|@lid)$/.test(chatJid) || (this.allowGroups&&/@g\\.us$/.test(chatJid)))) {
+            this.emit('message',{id,chatJid,senderJid:normalizeJid(item?.key?.participant||chatJid),
+              content,isFromMe:!!item?.key?.fromMe,timestamp:new Date().toISOString()});
+          }
         }
         this.persistSoon();
       });
@@ -279,6 +286,25 @@ export class WhatsApp extends EventEmitter {
         this.persistSoon();
       });
 
+      // Native linked-device history events can contain messages sent/received
+      // on the phone or another desktop client. Import a bounded chunk to avoid
+      // exhausting a free 512 MB host; never claim a full-history download.
+      client.ev.on('messaging-history.set', ({messages=[], contacts=[]}) => {
+        if (!current()) return;
+        for (const contact of contacts.slice(-300)) emitContact(contact);
+        for (const message of messages.slice(-400)) {
+          const chatJid=normalizeJid(message?.key?.remoteJid);
+          if (!(/(@s\.whatsapp\.net|@lid)$/.test(chatJid)||(this.allowGroups&&/@g\.us$/.test(chatJid)))) continue;
+          const id=String(message?.key?.id||'').trim();
+          if (!id) continue;
+          const isFromMe=!!message?.key?.fromMe;
+          const senderJid=normalizeJid(message?.key?.participant||(isFromMe?client.user?.id:chatJid));
+          this.emit('message',{id,chatJid,senderJid,senderPhone:phoneFromJid(senderJid),
+            content:messageText(message),isFromMe,mediaType:mediaInfo(message).type,
+            timestamp:messageTime(message),chatName:String(message?.pushName||'').slice(0,240)});
+        }
+        this.persistSoon();
+      });
       client.ev.on('messages.upsert', ({ messages }) => {
         if (!current()) return;
         for (const message of messages || []) {

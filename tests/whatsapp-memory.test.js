@@ -37,6 +37,11 @@ test('WhatsAppMemory: contatos, chats, busca, contexto e ultima interacao', () =
 
     assert.equal(memory.getDirectChat('5511999990001').jid, '5511999990001@s.whatsapp.net');
     assert.equal(memory.getLastInteraction('5511999990001@s.whatsapp.net').id, 'm3');
+    assert.equal(memory.acknowledge('m2',2),true);
+    assert.equal(memory.acknowledge('m2',1),true);
+    const delivered=memory.listMessages({chat_jid:'5511999990001@s.whatsapp.net',include_context:false}).find(x=>x.id==='m2');
+    assert.equal(delivered.ack,2);
+    assert.equal(memory.acknowledge('missing',2),false);
 
     const context = memory.getMessageContext('m2', 5, 5);
     assert.equal(context.message.id, 'm2');

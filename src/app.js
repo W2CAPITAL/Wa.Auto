@@ -599,6 +599,17 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
     res.json({ ok: true, userScoped: true, messages: rows });
   });
 
+  // Bounded catch-up for CRM devices: reads persisted SQLite even if WhatsApp has not reconnected.
+  app.get('/api/integrations/lexispredict/sync', requireLexisIntegration, (req, res) => {
+    const session = userSession(req);
+    const chats = session.memory.listChats({limit:12, page:0, include_last_message:true});
+    const messages = chats.flatMap(chat => session.memory.listMessages({
+      chat_jid:chat.jid,limit:15,page:0,include_context:false,
+    }).map(message => ({...message,content:String(message.content||'').slice(0,4000)})));
+    res.json({ok:true,userScoped:true,chats,messages,archivedAt:new Date().toISOString(),
+      notice:'Lote recente do histórico persistido. Pode não conter mensagens antigas de outros aparelhos.'});
+  });
+
   app.post('/api/integrations/lexispredict/send', requireLexisIntegration, async (req, res) => {
     const session = userSession(req);
     const userTransport = session.transport;

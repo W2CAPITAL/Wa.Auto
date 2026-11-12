@@ -84,6 +84,9 @@ export class LexisSessionManager {
       session.lastAccess = Date.now();
       this.touch();
     });
+    transport.on('ack', ({id,ack}) => {
+      if (memory.acknowledge(id,ack)) this.touch();
+    });
     transport.on('contact', contact => {
       memory.upsertContact(contact);
       session.lastAccess = Date.now();

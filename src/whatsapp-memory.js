@@ -36,6 +36,17 @@ export class WhatsAppMemory {
       CREATE INDEX IF NOT EXISTS wa_messages_sender ON wa_messages(sender_phone,timestamp DESC);
       CREATE INDEX IF NOT EXISTS wa_chats_last_active ON wa_chats(last_message_at DESC);
     `);
+    // Existing archives created before delivery receipts have no ack column.
+    if (!this.db.prepare('PRAGMA table_info(wa_messages)').all().some(col => col.name === 'ack')) {
+      this.db.exec('ALTER TABLE wa_messages ADD COLUMN ack INTEGER NOT NULL DEFAULT 0');
+    }
+  }
+
+  acknowledge(messageId,level) {
+    const id=String(messageId||'').trim(), ack=Number(level);
+    if (!id || !Number.isInteger(ack) || ack<1 || ack>3) return false;
+    const row=this.db.prepare('UPDATE wa_messages SET ack=MAX(ack,?) WHERE id=?').run(ack,id);
+    return row.changes>0;
   }
 
   upsertContact({ jid, name = '', phone = '' } = {}) {
