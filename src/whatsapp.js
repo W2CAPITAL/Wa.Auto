@@ -250,15 +250,17 @@ export class WhatsApp extends EventEmitter {
       client.ev.on('messages.update', updates => {
         if (!current()) return;
         for (const item of updates || []) {
+          const id = String(item?.key?.id||'').trim();
+          if (!id) continue;
           const status = Number(item?.update?.status);
-          const id = item?.key?.id;
-          if (!id || !Number.isFinite(status)) continue;
-          const ack = status <= 0 ? -1 : status >= 4 ? 3 : status === 3 ? 2 : status >= 2 ? 1 : 0;
-          if (ack) this.emit('ack', { id, ack });
+          if (Number.isFinite(status)) {
+            const ack = status <= 0 ? 0 : status >= 4 ? 3 : status === 3 ? 2 : status >= 2 ? 1 : 0;
+            if (ack) this.emit('ack', { id, ack });
+          }
           // A mensagem pode chegar decriptada depois do primeiro placeholder.
           const chatJid=normalizeJid(item?.key?.remoteJid);
           const content=item?.update?.message ? messageText({message:item.update.message}) : '';
-          if (content && (/(@s\\.whatsapp\\.net|@lid)$/.test(chatJid) || (this.allowGroups&&/@g\\.us$/.test(chatJid)))) {
+          if (content && (/(@s\.whatsapp\.net|@lid)$/.test(chatJid) || (this.allowGroups&&/@g\.us$/.test(chatJid)))) {
             this.emit('message',{id,chatJid,senderJid:normalizeJid(item?.key?.participant||chatJid),
               content,isFromMe:!!item?.key?.fromMe,timestamp:new Date().toISOString()});
           }
@@ -291,8 +293,8 @@ export class WhatsApp extends EventEmitter {
       // exhausting a free 512 MB host; never claim a full-history download.
       client.ev.on('messaging-history.set', ({messages=[], contacts=[]}) => {
         if (!current()) return;
-        for (const contact of contacts.slice(-300)) emitContact(contact);
-        for (const message of messages.slice(-400)) {
+        for (const contact of (Array.isArray(contacts)?contacts:[]).slice(-300)) emitContact(contact);
+        for (const message of (Array.isArray(messages)?messages:[]).slice(-400)) {
           const chatJid=normalizeJid(message?.key?.remoteJid);
           if (!(/(@s\.whatsapp\.net|@lid)$/.test(chatJid)||(this.allowGroups&&/@g\.us$/.test(chatJid)))) continue;
           const id=String(message?.key?.id||'').trim();
