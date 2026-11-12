@@ -10,6 +10,7 @@ import { AppError, requireValue } from './errors.js';
 import { normalizeCnj, resolveDataJudAlias, parseClientDate } from './legal-monitor.js';
 import { registerDossierRoutes } from './dossier-routes.js';
 import { registerWhatsappMcp } from './whatsapp-mcp.js';
+import {authorizeProjectW1SC} from './crm-authorization.js';
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 const metadata = imported => ({ ...imported, sheets: imported.sheets.map(({ rows, ...sheet }) => ({ ...sheet, rowCount: rows.length })) });
@@ -133,6 +134,11 @@ export function createApp({ store, transport, queue, legalMonitor = null, resour
       };
       return next();
     }
+
+    // CRM W1SC uses a verified Supabase user token instead of a shared Render secret.
+    // Identity is always derived from the verified JWT, never x-lexis-user-id.
+    const crmUser=await authorizeProjectW1SC(req).catch(()=>null);
+    if (crmUser?.ok){req.lexisAuthorization=crmUser;return next();}
 
     const authorization = await lexisAuthorization(req);
     if (!authorization.ok) {
